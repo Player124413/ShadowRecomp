@@ -771,7 +771,7 @@ std::optional<gfx::dds::MipTail> load_thumbnail(const EntryLoadSnapshot& entry) 
   return gfx::dds::parse_dds_mip_tail({bytes.data(), bytes.size()}, gx::texture::ReplacementThumbnailDim);
 }
 
-void worker_main(std::stop_token token) {
+void worker_main(thread::StopToken token) {
   std::stop_callback notifyOnStop{token, [] { s_jobCv.notify_all(); }};
   while (true) {
     LoadJob job;

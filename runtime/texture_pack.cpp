@@ -807,7 +807,8 @@ void index_originals() {   // under g_orig_mutex
          !ec && it != fs::recursive_directory_iterator(); it.increment(ec)) {
       if (!it->is_regular_file(ec)) continue;
       const fs::path& p = it->path();
-      if (p.native().find(LRT_S "UI" RT_S "") != std::wstring::npos) continue;
+      // wstring() rather than native(): the path is wide on Windows and narrow elsewhere, the test is the same
+      if (p.wstring().find(RT_SW L"UI" RT_SW L"") != std::wstring::npos) continue;
       std::string k = key_of(p);
       if (!k.empty()) g_orig_index.emplace(k, p);
     }

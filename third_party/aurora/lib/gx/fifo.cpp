@@ -73,7 +73,7 @@ void process_to(uint64_t target, std::memory_order order) noexcept {
   }
 }
 
-void worker_main(std::stop_token token) noexcept {
+void worker_main(thread::StopToken token) noexcept {
   std::stop_callback wakeOnStop{token, wake_worker};
   while (true) {
     const uint32_t event = sWorkerWake.load(std::memory_order_acquire);

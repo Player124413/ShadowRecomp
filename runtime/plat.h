@@ -30,8 +30,10 @@
 // with "\\" or hold "\\a\\b" now uses this.
 #ifdef _WIN32
 #define RT_S "\\"
+#define RT_SW L"\\"        // the same separator as a wide literal (std::filesystem paths on Windows are wide)
 #else
 #define RT_S "/"
+#define RT_SW L"/"
 #endif
 
 namespace plat {
