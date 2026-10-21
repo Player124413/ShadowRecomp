@@ -934,14 +934,26 @@ void init_fonts() {
     if (SDL_GetDisplayBounds(SDL_GetDisplayForWindow(gxlle::g_window), &r)) scale = r.h * std::max(1.f, SDL_GetWindowPixelDensity(gxlle::g_window)) / 1080.f;
   }
   scale = std::clamp(scale, 1.f, 4.f);
-  auto load = [&](std::initializer_list<const char*> files, float px) -> ImFont* {
-    for (const char* f : files)
-      if (FILE* t = fopen(f, "rb")) { fclose(t); if (ImFont* ft = io.Fonts->AddFontFromFileTTF(f, px * scale, nullptr, kRanges)) return ft; }
+  // the same, for a list that is not known at compile time (the extra font locations above)
+  auto load_paths = [&](const char* const* files, float px) -> ImFont* {
+    for (const char* const* f = files; *f; ++f)
+      if (FILE* t = fopen(*f, "rb")) { fclose(t); if (ImFont* ft = io.Fonts->AddFontFromFileTTF(*f, px * scale, nullptr, kRanges)) return ft; }
     return nullptr;
   };
-  f_title = load({"C:/Windows/Fonts/bahnschrift.ttf", "C:/Windows/Fonts/segoeuib.ttf"}, 46);
-  f_text = load({"C:/Windows/Fonts/segoeui.ttf", "C:/Windows/Fonts/arial.ttf"}, 26);
-  f_semi = load({"C:/Windows/Fonts/seguisb.ttf", "C:/Windows/Fonts/segoeuib.ttf", "C:/Windows/Fonts/arialbd.ttf"}, 22);
+  // Where a readable font lives: the PC's own fonts, or the phone's (Android always has Roboto). Without either the
+  // menu falls back to ImGui's built-in font, which is legible but small.
+  static const char* const kTitle[] = {
+      "C:/Windows/Fonts/bahnschrift.ttf", "C:/Windows/Fonts/segoeuib.ttf",
+      "/system/fonts/RobotoCondensed-Bold.ttf", "/system/fonts/Roboto-Bold.ttf", "/system/fonts/DroidSans-Bold.ttf", nullptr};
+  static const char* const kBody[] = {
+      "C:/Windows/Fonts/segoeui.ttf", "C:/Windows/Fonts/arial.ttf",
+      "/system/fonts/Roboto-Regular.ttf", "/system/fonts/RobotoCondensed-Regular.ttf", "/system/fonts/DroidSans.ttf", nullptr};
+  static const char* const kSemi[] = {
+      "C:/Windows/Fonts/seguisb.ttf", "C:/Windows/Fonts/segoeuib.ttf", "C:/Windows/Fonts/arialbd.ttf",
+      "/system/fonts/Roboto-Medium.ttf", "/system/fonts/Roboto-Bold.ttf", "/system/fonts/DroidSans-Bold.ttf", nullptr};
+  f_title = load_paths(kTitle, 46);
+  f_text = load_paths(kBody, 26);
+  f_semi = load_paths(kSemi, 22);
   logf("[menu] fonts built at %.2fx\n", scale);
   texture_extract::ensure_folders();   // #143 textures\Custom + textures\Original next to the game
   logf("[build] Shadow the Hedgehog recomp %s\n", build_info::text());   // #137

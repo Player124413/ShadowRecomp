@@ -43,6 +43,7 @@ public class LauncherActivity extends Activity {
     private Button playButton;
     private LinearLayout presetGroup;
     private CheckBox touchToggle;
+    private Button editTouchButton;
     private SeekBar renderScale;
     private TextView renderScaleLabel;
 
@@ -103,7 +104,6 @@ public class LauncherActivity extends Activity {
             String[] kv = p.split("\\|");
             RadioButton rb = new RadioButton(this);
             rb.setText(kv[1]);
-            rb.setId(kv[0].hashCode());
             rb.setTag(kv[0]);
             rb.setTextColor(Color.WHITE);
             rb.setChecked(kv[0].equals(saved));
@@ -140,9 +140,9 @@ public class LauncherActivity extends Activity {
         touchToggle.setChecked(prefs.getBoolean("touch_controls", true));
         root.addView(touchToggle);
 
-        Button editTouch = button("Edit the touch controls\u2026", false);
-        editTouch.setOnClickListener(v -> startGame(true));
-        root.addView(editTouch);
+        editTouchButton = button("Edit the touch controls\u2026", false);
+        editTouchButton.setOnClickListener(v -> startGame(true));
+        root.addView(editTouchButton);
         TextView editHint = text("Buttons and sticks are dragged, resized and rebound in the game, over the picture, " +
                 "with a finger. A gamepad hides them while it is connected.", 13, Color.rgb(150, 156, 170));
         root.addView(editHint);
@@ -181,7 +181,11 @@ public class LauncherActivity extends Activity {
     }
 
     private void refreshDiscStatus() {
-        if (DiscImport.haveDisc(this)) {
+        // The editor draws over the running game (the only place a control can be judged against the picture), so it
+        // needs the game booted, and the game needs the disc: both buttons wait for the import.
+        final boolean have = DiscImport.haveDisc(this);
+        if (editTouchButton != null) editTouchButton.setEnabled(have);
+        if (have) {
             long mb = DiscImport.discFile(this).length() / (1024 * 1024);
             status.setText("Disc image ready (" + mb + " MB).");
             status.setTextColor(Color.rgb(120, 220, 150));
@@ -269,7 +273,7 @@ public class LauncherActivity extends Activity {
     }
 
     private void startGame(boolean editTouch) {
-        if (!DiscImport.haveDisc(this) && !editTouch) {
+        if (!DiscImport.haveDisc(this)) {
             Toast.makeText(this, "Import your disc image first.", Toast.LENGTH_SHORT).show();
             return;
         }

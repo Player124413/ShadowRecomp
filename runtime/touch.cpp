@@ -31,7 +31,8 @@ namespace {
 // state
 File g_file;
 bool g_loaded = false;
-bool g_enabled = true;             // settings_ui.cpp "Touch controls"
+bool g_enabled = true;             // touch_layouts.ini "enabled"; --touch overrides it for that run
+bool g_enabled_forced = false;     // --touch was given (the launcher's switch)
 int g_active = 0;                  // index into g_file.layouts
 State g_state;
 bool g_menu_press = false;
@@ -90,6 +91,7 @@ void ensure_loaded() {
     g_file = defaults();
     g_active = 0;
   }
+  if (!g_enabled_forced) g_enabled = g_file.enabled;
 }
 
 Layout* active() {
@@ -648,7 +650,15 @@ void save() {
 }
 
 bool enabled() { return g_enabled; }
-void set_enabled(bool on) { g_enabled = on; }
+void set_enabled(bool on) {
+  g_enabled = on;
+  g_enabled_forced = true;
+  // remember it for the next start too (the in-game menu can change it as well)
+  if (g_loaded && g_file.enabled != on) {
+    g_file.enabled = on;
+    save();
+  }
+}
 
 int layout_count() { return (int)g_file.layouts.size(); }
 const char* layout_name(int index) {
@@ -799,8 +809,9 @@ void close_editor(bool save_changes) {
 
 void draw() {
   ensure_loaded();
-  if (!g_enabled) return;
-  if (!g_editor && !wanted()) return;
+  // The editor draws even when the overlay is switched off: a layout that ended up unusable is fixed there, and the
+  // launcher's "Edit the touch controls" would otherwise show nothing.
+  if (!g_editor && (!g_enabled || !wanted())) return;
   draw_layer(g_editor);
   if (g_editor) draw_editor();
 }

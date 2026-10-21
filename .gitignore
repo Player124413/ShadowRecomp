@@ -62,6 +62,9 @@
 !/android/README.md
 !/android/PORT-STATUS.md
 !/android/app/build.gradle
+!/android/build.sh
+!/android/gradle/wrapper/gradle-wrapper.properties
+!/android/local.properties.example
 !/android/app/proguard-rules.pro
 !/android/app/src/main/AndroidManifest.xml
 !/android/app/src/main/res/

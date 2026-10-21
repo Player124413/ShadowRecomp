@@ -16,11 +16,21 @@ set(AURORA_ENABLE_EXAMPLES OFF CACHE BOOL "" FORCE)
 file(TO_CMAKE_PATH "$ENV{USERPROFILE}/miniconda3" _conda)   # keep a user conda out of the package search
 set(CMAKE_IGNORE_PREFIX_PATH "${_conda}" CACHE STRING "" FORCE)
 if(ANDROID)
-  # libSDL3.so, as SDL3's own Android project does: its Java activity loads it by name before libmain.so.
+  # libSDL3.so, as SDL3's own Android project does: its Java activity loads it by name before libmain.so. Built from
+  # source here (Aurora insists on that on Android), so no SDL3 SDK is needed on the machine.
+  set(AURORA_SDL3_PROVIDER vendor CACHE STRING "" FORCE)
   set(AURORA_SDL3_LINKAGE shared CACHE STRING "" FORCE)
 endif()
 add_subdirectory(third_party/aurora ${CMAKE_BINARY_DIR}/aurora EXCLUDE_FROM_ALL)
 
+# generated/ is produced by tools/gen.py from the player's own disc image and is never committed. Without it there is
+# nothing to simulate, so say that plainly instead of failing on a missing include or an unknown function.
+if(NOT EXISTS ${CMAKE_CURRENT_LIST_DIR}/generated/files.cmake)
+  message(FATAL_ERROR "generated/files.cmake is missing.\n"
+    "  Run:  python tools/gen.py     (from the repository root, once)\n"
+    "  It needs Python 3 and the uncompiled main.dol of your own Shadow the Hedgehog (USA) disc, which the tool \n"
+    "  takes from the disc folder or from --dol; the result (the recompiled game code) stays out of git.")
+endif()
 include(generated/files.cmake)
 file(GLOB RT_SOURCES ${CMAKE_CURRENT_LIST_DIR}/runtime/*.cpp)
 # The exe icon and launcher art (runtime/shadow.ico, runtime/assets/*.png) come from the game, so they are not in git:
@@ -79,16 +89,24 @@ if(ANDROID)
   # -O3 and no frame pointers: the game is one thread of interdependent work and 60 fps is the target on every phone.
   # No fast-math: the emulated PPC code must round exactly like the console.
   target_compile_options(main PRIVATE -O3 -fno-strict-aliasing -fomit-frame-pointer -ffunction-sections -fdata-sections)
-  target_link_options(main PRIVATE -Wl,--gc-sections -Wl,--as-needed)
+  # --gc-sections: only the game code that is reached is kept (the recompiled image is big).
+  # max-page-size: Android 15+ can map libraries with 16 KB pages; without the flag such a device refuses to load them.
+  target_link_options(main PRIVATE -Wl,--gc-sections -Wl,--as-needed -Wl,-z,max-page-size=16384)
   target_compile_definitions(main PRIVATE WEBGPU_DAWN)
-  find_library(SHADOW_ANDROID_LOG log)
-  find_library(SHADOW_ANDROID_ANDROID android)
+  # -llog / -landroid / EGL / GLESv3 come out of the NDK's own sysroot: plain names are what the toolchain expects.
   target_link_libraries(main PRIVATE aurora_gx aurora_core aurora_vi ${AURORA_SDL3_TARGET}
       absl::btree absl::flat_hash_map Tracy::TracyClient dawn::webgpu_dawn sqlite3 PNG::PNG
-      ${SHADOW_ANDROID_LOG} ${SHADOW_ANDROID_ANDROID} EGL GLESv3)
+      log android EGL GLESv3)
 
-  # Gradle picks the libraries up from here (android/app/build.gradle: jniLibs.srcDir).
-  set_target_properties(main PROPERTIES LIBRARY_OUTPUT_DIRECTORY ${SHADOW_ANDROID_DIR}/app/src/main/jniLibs/${CMAKE_ANDROID_ARCH_ABI})
+  # Gradle packages whatever is in jniLibs: both our libmain.so and libSDL3.so have to land there, or the app starts and
+  # immediately dies in System.loadLibrary.
+  set(_shadow_jnilibs ${SHADOW_ANDROID_DIR}/app/src/main/jniLibs/${CMAKE_ANDROID_ARCH_ABI})
+  set_target_properties(main PROPERTIES LIBRARY_OUTPUT_DIRECTORY ${_shadow_jnilibs})
+  if(TARGET SDL3-shared)
+    set_target_properties(SDL3-shared PROPERTIES LIBRARY_OUTPUT_DIRECTORY ${_shadow_jnilibs})
+  else()
+    message(WARNING "SDL3-shared target not found: libSDL3.so may not be packaged into the APK")
+  endif()
   return()
 endif()
 

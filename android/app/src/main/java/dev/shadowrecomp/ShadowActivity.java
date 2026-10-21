@@ -34,7 +34,20 @@ public class ShadowActivity extends SDLActivity {
 
     @Override
     protected String[] getArguments() {
+        // Normally the launcher's copy (a static), but the system may recreate this activity after killing the process;
+        // the intent it was started with survives that, so read from it too.
+        if (sArgs.length == 0 && getIntent() != null) {
+            String extra = getIntent().getStringExtra(EXTRA_ARGS);
+            if (extra != null && !extra.isEmpty()) setArgs(extra);
+        }
         return sArgs;
+    }
+
+    @Override
+    protected void onCreate(android.os.Bundle savedInstanceState) {
+        super.onCreate(savedInstanceState);
+        // A game is played, not read: never let the screen time out under a thumb.
+        getWindow().addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
     }
 
     @Override

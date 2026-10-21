@@ -10,7 +10,13 @@ final class DeviceInfo {
     }
 
     static String soc() {
-        String soc = Build.SOC_MODEL;
+        String soc = null;
+        if (Build.VERSION.SDK_INT >= 31) {
+            try {
+                soc = Build.SOC_MODEL;   // absent before API 31: guarded, and again by the try
+            } catch (Throwable ignored) {
+            }
+        }
         if (soc == null || soc.isEmpty() || "unknown".equals(soc)) soc = Build.HARDWARE;
         return soc == null ? "unknown" : soc.replace(' ', '_');
     }

@@ -8,6 +8,7 @@
 //   active=classic            which layout the game uses (a name from this file)
 //   scale=100                 every widget's size, %
 //   opacity=100               every widget's opacity, %
+//   enabled=1                 show the controls at all (the launcher writes this)
 //   left_handed=0             mirror the whole picture left <-> right
 //   hide_with_gamepad=1       hide the overlay while a physical controller is connected
 //   [classic]                 one layout; the section name is its name (a saved one may be renamed)
@@ -55,6 +56,7 @@ struct File {
   std::string active;
   int scale = 100;         // %
   int opacity = 100;       // %
+  bool enabled = true;     // the overlay is on
   bool left_handed = false;
   bool hide_with_gamepad = true;
   std::vector<Layout> layouts;

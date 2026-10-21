@@ -247,6 +247,7 @@ File parse(const std::string& text) {
       else if (key == "active") f.active = val;
       else if (key == "scale") f.scale = clampi(atoi(val.c_str()), 50, 200);
       else if (key == "opacity") f.opacity = clampi(atoi(val.c_str()), 20, 100);
+      else if (key == "enabled") f.enabled = atoi(val.c_str()) != 0;
       else if (key == "left_handed") f.left_handed = atoi(val.c_str()) != 0;
       else if (key == "hide_with_gamepad") f.hide_with_gamepad = atoi(val.c_str()) != 0;
       continue;
@@ -277,9 +278,10 @@ std::string dump(const File& file) {
   out += "# ShadowRecomp touch controls. Edit this file in game (Settings > Touch controls > Edit layout) or by\n";
   out += "# hand: x and y are 0..1 of the screen, r is of the screen's short side.\n";
   char head[256];
-  snprintf(head, sizeof head, "version=%d\nactive=%s\nscale=%d\nopacity=%d\nleft_handed=%d\nhide_with_gamepad=%d\n\n",
-           file.version, file.active.c_str(), file.scale, file.opacity, file.left_handed ? 1 : 0,
-           file.hide_with_gamepad ? 1 : 0);
+  snprintf(head, sizeof head,
+           "version=%d\nactive=%s\nscale=%d\nopacity=%d\nenabled=%d\nleft_handed=%d\nhide_with_gamepad=%d\n\n",
+           file.version, file.active.c_str(), file.scale, file.opacity, file.enabled ? 1 : 0,
+           file.left_handed ? 1 : 0, file.hide_with_gamepad ? 1 : 0);
   out += head;
   for (const auto& l : file.layouts) {
     out += "[" + l.name + "]\n";

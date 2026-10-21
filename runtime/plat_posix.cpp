@@ -19,7 +19,6 @@
 #ifdef __ANDROID__
 #include <android/log.h>
 #include <sys/resource.h>
-#include <sys/system_properties.h>
 #endif
 
 namespace plat {
@@ -212,7 +211,7 @@ void android_toast(const char* text) {
 }
 
 void android_keep_screen_on(bool on) {
-  (void)on;   // FLAG_KEEP_SCREEN_ON is set by the Java activity from the game's settings
+  (void)on;   // the game activity holds FLAG_KEEP_SCREEN_ON for as long as it is in front (ShadowActivity.java)
 }
 
 void android_set_requested_orientation(int landscape) { (void)landscape; }

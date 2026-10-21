@@ -19,6 +19,7 @@
 //
 // Remaining known differences above 60 (being worked through): objects whose own code adds a fixed amount per frame.
 #include "sys.h"
+#include "plat.h"
 #include "gx_lle.h"
 #include "settings_ui.h"
 #include "cheats.h"
@@ -94,6 +95,27 @@ void hle_FramePace(Cpu& c) {
   uint32_t self = ld32(0x800000E4), prio = self ? ld32(self + 0x2D4) : 0;
   bool yield = rate && self;
   if (yield) { Cpu saved = c; c.r[3] = self; c.r[4] = 31; f_8037866C(c); c = saved; }
+  // A phone must not spin. The game's frame wait (fn_801E1BD4, called below) is a spin on OSGetTime; on a console and
+  // on a desktop core that is a few thousand cycles of nothing, but a phone burns a whole core per frame doing it, and
+  // that is heat, which becomes a lost frame budget a few minutes in. Waiting here, before the game's own wait, until
+  // the frame's deadline leaves that spin nothing to do; the game reads the same clock either way, so its time step
+  // and its frame counters cannot tell the difference. FR_NO_PACE=1 turns it off (A/B on a device).
+  if (rate && plat::is_android() && !getenv("FR_NO_PACE")) {
+    static uint64_t deadline = 0;
+    const uint64_t period = 1000000000ull / (uint64_t)rate;
+    uint64_t now = sys_time_ns();
+    if (deadline) {
+      if (deadline > now) {
+        const uint64_t left = deadline - now;
+        if (left > 2000000ull) plat::sleep_ms((int)((left - 1500000ull) / 1000000ull));   // 1.5 ms left for the spin
+      } else if (now - deadline > period) {
+        deadline = now;   // we fell behind (a slow frame): start again from here rather than accumulate debt
+      }
+    } else {
+      deadline = now;
+    }
+    deadline += period;
+  }
   uint64_t t0 = sys_time_ns();
   // Audio first. The sound threads share the one host thread with rendering; at a saturated frame rate (unlimited,
   // or a light menu at hundreds of fps) they answered the audio interrupts too late and the output stuttered. When

@@ -2,46 +2,51 @@ plugins {
     id 'com.android.application'
 }
 
-// The native side comes from ../../CMakeLists.txt: libmain.so is libmain.so + SDL3, and SDL3's Java classes plus
-// Aurora's surface are copied into app/src/main/java by CMake at configure time (one source of truth for them).
+// 64-bit only: "arm64-v8a" (every 64-bit phone) by default, see gradle.properties (shadow.abis).
+// The native side comes from ../../CMakeLists.txt; it produces libmain.so, and copies SDL3's Java classes and Aurora's
+// surface into app/src/main/java at configure time, so those exist in exactly one place in the repository.
+def shadowAbis = (project.findProperty('shadow.abis') ?: 'arm64-v8a').split(',').collect { it.trim() }
+
+// An optional keystore.properties (keystore, alias, password) signs release builds; without it a release build is
+// unsigned and the debug build is what you install.
+def keystorePropsFile = rootProject.file('keystore.properties')
+def keystoreProps = new Properties()
+if (keystorePropsFile.exists()) {
+    keystorePropsFile.withInputStream { keystoreProps.load(it) }
+}
+
 android {
     namespace = 'dev.shadowrecomp'
     compileSdk = 35
-    ndkVersion = '27.0.12077973'
+    ndkVersion = project.findProperty('shadow.ndk') ?: '27.0.12077973'
 
     defaultConfig {
         applicationId = 'dev.shadowrecomp'
-        minSdk = 26                 // Vulkan 1.0 + ETC2 required by the renderer (every 64-bit phone has them)
+        minSdk = 26                 // Vulkan + ETC2 are required by the renderer and present on every 64-bit phone
         targetSdk = 35
         versionCode = 1
         versionName = '1.0'
 
-        // 64-bit only: the port is aimed at 64-bit phones, and 32-bit devices cannot run this game at 60 fps.
         ndk {
-            abiFilters 'arm64-v8a', 'x86_64'
+            abiFilters.addAll(shadowAbis)
         }
         externalNativeBuild {
             cmake {
-                arguments '-DANDROID_STL=c++_static', '-DANDROID_PLATFORM=android-26',
-                          '-DCMAKE_BUILD_TYPE=Release'
+                // Static libc++: one less .so to ship and to keep in sync with SDL3.
+                arguments '-DANDROID_STL=c++_static', '-DANDROID_PLATFORM=android-26', '-DCMAKE_BUILD_TYPE=Release'
                 cppFlags '-std=c++20'
             }
         }
     }
 
-    externalNativeBuild {
-        cmake {
-            path '../../CMakeLists.txt'
-            version '3.25.1'
-        }
-    }
-
-    sourceSets {
-        main {
-            // libmain.so + SDL3 (CMake writes them here)
-            jniLibs.srcDirs = ['src/main/jniLibs']
-            // CMake copies SDL3's org.libsdl.app and Aurora's dev.encounter.aurora here
-            java.srcDirs = ['src/main/java']
+    if (!keystoreProps.isEmpty()) {
+        signingConfigs {
+            release {
+                storeFile rootProject.file(keystoreProps['storeFile'])
+                storePassword keystoreProps['storePassword']
+                keyAlias keystoreProps['keyAlias']
+                keyPassword keystoreProps['keyPassword']
+            }
         }
     }
 
@@ -53,15 +58,34 @@ android {
         release {
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
+            if (!keystoreProps.isEmpty()) signingConfig signingConfigs.release
         }
     }
 
-    packagingOptions {
-        jniLibs {
-            useLegacyPackaging = false
-            // the game ships its own libraries: they must not be compressed or renamed
-            keepDebugSymbols += ['**/libmain.so']
+    externalNativeBuild {
+        cmake {
+            path file('../../CMakeLists.txt')
+            version '3.25.1'
         }
+    }
+
+    sourceSets {
+        main {
+            jniLibs.srcDirs = ['src/main/jniLibs']   // CMake writes libmain.so and libSDL3.so here
+            java.srcDirs = ['src/main/java']         // ours + SDL3's org.libsdl.app + Aurora's dev.encounter.aurora
+        }
+    }
+
+    packaging {
+        jniLibs {
+            // Uncompressed and 16 KB page aligned (Android 15 requirement).
+            useLegacyPackaging = false
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
     }
 
     lint {
@@ -69,5 +93,13 @@ android {
     }
 }
 
-// Copy the built libraries from CMake's output to the packaging folder is done by CMake itself
-// (LIBRARY_OUTPUT_DIRECTORY), so nothing to do here.
+// The libraries are produced by CMake straight into src/main/jniLibs/<abi> (see the CMakeLists' Android branch), so
+// Gradle only has to package them.
+//
+// CMake also *copies SDL3's Java classes and Aurora's surface* into src/main/java when it configures, so Java must not
+// start compiling before that has happened: make every Java compile depend on the CMake configure tasks.
+tasks.configureEach { task ->
+    if (task.name.matches(/compile.*JavaWithJavac/)) {
+        dependsOn tasks.matching { it.name.startsWith('configureCMake') || it.name.startsWith('buildCMake') }
+    }
+}

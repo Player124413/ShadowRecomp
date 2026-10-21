@@ -1,0 +1,3 @@
+# Copy to local.properties (never committed) and point it at your Android SDK.
+# Android Studio writes this file itself when you open the android/ folder.
+sdk.dir=/home/you/Android/Sdk

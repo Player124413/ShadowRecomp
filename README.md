@@ -41,6 +41,20 @@ All the settings live in a menu inside the game. Press **Back** on a controller 
 
 ![The settings menu over the game](media/settings-menu.webp)
 
+## Android
+
+There is a 64-bit Android port: one APK, a launcher that imports your own disc image, and touch controls you edit in
+the game with your fingers (drag, resize, rebind, save as your own layout; presets for right- and left-handed play).
+
+```sh
+cd android && ./build.sh          # debug APK; ./build.sh --install also installs it
+```
+
+It needs JDK 17+, the Android SDK with the NDK, and the recompiled game code (`python tools/gen.py`). The launcher
+copies your disc image into the app's folder once and the game reads it in place, so nothing is unpacked and no game
+files are ever in the repository. Details, including the touch layout file format and the graphics presets:
+[`android/README.md`](android/README.md), and where the port stands: [`android/PORT-STATUS.md`](android/PORT-STATUS.md).
+
 ## Stage editor (work in progress)
 
 There's also a stage editor, Stage Forge, for making your own levels. It's not finished and isn't in the release download yet, so everything here is subject to change.
