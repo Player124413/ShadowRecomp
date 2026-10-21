@@ -86,13 +86,17 @@ you start the build, so nothing has to be stored in the repository:
 2. **Actions → Android APK → Run workflow**, and paste the link into **game_code_url**.
 3. When it finishes, download the artifact **`shadowrecomp-android-arm64-debug`**.
 
-The link may point at a `.tar.gz`, `.tgz`, `.tar.xz` or `.zip`, or at a single file. These are all accepted:
+The link may point at a disc image, an archive (`.tar.gz`, `.tgz`, `.tar.xz`, `.zip`) or a single file:
 
 | What you upload | Size | What the job does |
 | --- | --- | --- |
+| your `.iso` / `.gcm` image | ~1.4 GB | takes `sys/main.dol` out of it (`gameimport.py extract`) and runs `tools/gen.py` |
 | `generated/` | ~200 MB | uses it as is (fastest) |
 | your disc folder (`sys/main.dol` + `files/`) | ~1.4 GB | runs `tools/gen.py` on it here |
-| `main.dol` alone - as a file, or inside an archive | ~5 MB | runs `tools/gen.py` on it here (usually the easiest) |
+| `main.dol` alone - as a file, or inside an archive | ~5 MB | runs `tools/gen.py` on it here (the smallest upload) |
+
+Dolphin-compressed images (`.rvz`, `.wia`, `.gcz`) are not read here: Dolphin's tool is not on the runner. Convert once
+to ISO in Dolphin (right-click the game → Convert File… → Format: ISO) and link that.
 
 On Hugging Face, use the **direct** link, not the file page: `.../resolve/main/main.dol` (the "Download" button gives
 exactly that) rather than `.../blob/main/main.dol`. A file page answers with HTML, and the build stops with a message

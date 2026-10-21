@@ -12,8 +12,9 @@ name: Android APK
 #                   file is built while the link is left out. This is the check that catches "it stopped building".
 #   apk           - the actual installable APK. The recompiled game code only exists on the machine of someone who owns
 #                   the disc, so this job asks for a link to it: "Run workflow" has a box called `game_code_url`, and a
-#                   Hugging Face link (or any direct link) to a .tar.gz / .zip of generated/, of a disc folder, or of
-#                   main.dol alone is enough - tools/gen.py is run here for the last two. A repository secret
+#                   Hugging Face link (or any direct link) to an .iso/.gcm image, a .tar.gz / .zip of generated/ or of a
+#                   disc folder or main.dol, or main.dol itself is enough - the DOL is extracted from an image, and
+#                   tools/gen.py is run here unless the upload already contains generated/. A repository secret
 #                   SHADOW_GEN_URL still works as the default for pushes, if you would rather not paste it each time.
 #                   Without either, it builds a *launcher-only* APK: the same Gradle/NDK/SDL3/CMake packaging path, with
 #                   empty stand-ins in place of the game code (tools/android/stub_generated.py --definitions). That one
@@ -45,8 +46,8 @@ on:
     inputs:
       game_code_url:
         description: >-
-          Link to the game code for the APK: a Hugging Face (or any) direct link to a .tar.gz / .zip of generated/,
-          of a disc folder, or of main.dol alone. Leave empty to build the launcher-only APK.
+          A direct link (Hugging Face is fine) to any of: an .iso/.gcm image, a .tar.gz/.zip holding generated/ or a
+          disc folder or main.dol, or main.dol itself. Leave empty for the launcher-only APK.
         required: false
         default: ''
         type: string
@@ -277,12 +278,14 @@ jobs:
           URL: ${{ steps.gamecode.outputs.url }}
         run: |
           set -euo pipefail
-          # -L follows the redirect Hugging Face answers with (huggingface.co -> cdn-lfs.huggingface.co); --retry
-          # survives the occasional reset. What lands is either an archive or a single file, and both are accepted:
-          #   .tar.gz / .tgz / .zip of generated/, of a disc folder (sys/main.dol + files/), or of main.dol alone;
-          #   or main.dol itself, hosted as one file (the usual Hugging Face "upload a file" case).
+          # -L follows the redirect Hugging Face answers with (huggingface.co -> cdn-lfs.huggingface.co), --retry
+          # survives an occasional reset. What lands can be, in the order the checks below try them:
+          #   * an archive (.tar.gz / .tgz / .tar.xz / .zip) holding generated/, a disc folder, main.dol, or an ISO;
+          #   * a disc image (.iso / .gcm) - only the DOL inside it is needed, and tools/game_import extracts just that;
+          #   * main.dol itself, hosted as a single file.
           curl -fsSL --retry 3 --retry-delay 2 -o /tmp/gamecode.bin "$URL"
           echo "downloaded $(stat -c%s /tmp/gamecode.bin) bytes"
+
           # A Hugging Face *file page* (huggingface.co/user/repo/blob/main/...) answers with HTML, not with the file.
           # Say that plainly instead of downloading 12 kB of web page and calling it a disc.
           if head -c 512 /tmp/gamecode.bin | grep -qiE '<!doctype html|<html'; then
@@ -290,23 +293,55 @@ jobs:
             echo "::error ::raw button, or .../resolve/main/<file name> in place of .../blob/main/<file name>"
             exit 1
           fi
+
           rm -rf /tmp/gamecode && mkdir -p /tmp/gamecode
           if tar -tzf /tmp/gamecode.bin >/dev/null 2>&1; then
-            echo "archive: tar.gz"
-            tar -xzf /tmp/gamecode.bin -C /tmp/gamecode
+            echo "archive: tar.gz"; tar -xzf /tmp/gamecode.bin -C /tmp/gamecode
           elif tar -tJf /tmp/gamecode.bin >/dev/null 2>&1; then
-            echo "archive: tar.xz"
-            tar -xJf /tmp/gamecode.bin -C /tmp/gamecode
+            echo "archive: tar.xz"; tar -xJf /tmp/gamecode.bin -C /tmp/gamecode
           elif unzip -tq /tmp/gamecode.bin >/dev/null 2>&1; then
-            echo "archive: zip"
-            unzip -q /tmp/gamecode.bin -d /tmp/gamecode
+            echo "archive: zip"; unzip -q /tmp/gamecode.bin -d /tmp/gamecode
           else
-            echo "not an archive: treating it as main.dol"
-            mkdir -p /tmp/gamecode/sys && cp /tmp/gamecode.bin /tmp/gamecode/sys/main.dol
+            # Not an archive: what is it? Dolphin's compressed formats first, so the answer is a real one and not
+            # "this main.dol is not the USA release".
+            kind=$(python3 -c "
+          import sys
+          head = open('/tmp/gamecode.bin', 'rb').read(0x440)
+          if head[:4] in (b'RVZ\x01', b'WIA\x01') or head[:4] == b'\x01\xc0\x0b\xb1':
+              print('compressed')
+          elif len(head) >= 0x440 and head[0x1C:0x20] == b'\xc2\x33\x9f\x3d':
+              print('iso')
+          else:
+              print('file')
+          ")
+            case "$kind" in
+              compressed)
+                echo "::error ::that is a Dolphin-compressed image (RVZ/WIA/GCZ). Convert it once - in Dolphin,"
+                echo "::error ::right-click the game > Convert File... > Format: ISO - and link the ISO instead."
+                exit 1
+                ;;
+              iso)
+                echo "disc image: an ISO/GCM, so only the DOL inside it will be taken"
+                cp /tmp/gamecode.bin /tmp/gamecode/game.iso
+                ;;
+              *)
+                echo "single file: treating it as main.dol"
+                mkdir -p /tmp/gamecode/sys && cp /tmp/gamecode.bin /tmp/gamecode/sys/main.dol
+                ;;
+            esac
           fi
 
           gen_cmake=$(find /tmp/gamecode -maxdepth 6 -path '*/generated/files.cmake' | head -1 || true)
           dol=$(find /tmp/gamecode -maxdepth 6 -name main.dol | head -1 || true)
+          iso=$(find /tmp/gamecode -maxdepth 3 \( -iname '*.iso' -o -iname '*.gcm' \) | head -1 || true)
+          # An ISO is the friendliest thing to upload (it is what the phone wants too); this build needs one file out
+          # of it, so it is extracted - 1.4 GB does not have to be unpacked to get 5 MB.
+          if [ -z "$dol" ] && [ -n "$iso" ]; then
+            echo "extracting sys/main.dol from $iso"
+            python3 tools/game_import/gameimport.py extract "$iso" /tmp/disc-extract
+            dol=/tmp/disc-extract/sys/main.dol
+          fi
+
           if [ -n "$gen_cmake" ]; then
             echo "found recompiled game code in $(dirname "$(dirname "$gen_cmake")")"
             mkdir -p generated && cp -a "$(dirname "$gen_cmake")/." generated/
@@ -318,7 +353,7 @@ jobs:
               || { echo "::error ::that main.dol is not the USA release (GUPE8P rev 0) - the game would not run"; exit 1; }
             SHADOW_DISC=/tmp/disc python3 tools/gen.py
           else
-            echo "::error ::the link has neither generated/files.cmake nor a main.dol in it"
+            echo "::error ::the link has neither generated/files.cmake nor a disc image / main.dol in it"
             find /tmp/gamecode -maxdepth 3 | head -50
             exit 1
           fi

@@ -9,6 +9,8 @@ Library:  identify(path) -> Info      import_disc(src, dest, progress=None) -> R
 Command:  gameimport.py identify <disc or folder>
           gameimport.py import <disc or folder> <dest folder>      (dest is normally <game folder>\\Shadow)
           gameimport.py verify <extracted folder>
+          gameimport.py extract <disc> <dest folder> [--only sys/main.dol,other/file]
+                   (only the named files - what a build needs is just sys/main.dol, 5 MB of a 1.4 GB image)
           add --json for machine-readable output (the launcher)
 """
 import hashlib, json, os, shutil, struct, subprocess, sys, tempfile, time
@@ -378,6 +380,64 @@ def import_disc(src, dest, progress=None):
     return _run(src, os.path.abspath(dest), progress, True)
 
 
+def extract_files(src, dest, wanted=('sys/main.dol',), progress=None):
+    """Copy only the named files out of an image (or folder) - the recompiled build needs sys/main.dol and nothing else.
+
+    Used by the Android workflow, which is handed a whole ISO (1.4 GB) but only wants the DOL (5 MB) inside it. Only
+    entries that are in `wanted` are written, and each one is still checked against gupe8p.json, so a PAL or damaged
+    image is refused exactly as it is by import_disc().
+    """
+    info = identify(src)
+    if not info.ok:
+        return Result(False, info.message, dest=dest)
+    want = load_manifest()
+    res = Result(False, '', dest=os.path.abspath(dest))
+    f = None
+    try:
+        if info.kind == 'iso':
+            f = open(src, 'rb')
+            entries = {rel: ('iso', off, size) for rel, off, size in _iso_entries(f)}
+        elif info.kind == 'folder':
+            entries = {rel: p for rel, p in _folder_entries(src, info.kind)}
+        else:
+            return Result(False, f'Only an ISO/GCM or an extracted folder can be read directly (this is {info.kind}).')
+        total = sum(want[rel][0] for rel in wanted if rel in want)
+        done = 0
+        for rel in wanted:
+            if rel not in want:
+                return Result(False, f'{rel} is not a file of this disc.')
+            size, sha = want[rel]
+            entry = entries.get(rel)
+            if entry is None:
+                res.missing.append(rel)
+                continue
+            out = os.path.join(res.dest, *rel.split('/'))
+            os.makedirs(os.path.dirname(out), exist_ok=True)
+            if progress:
+                progress(done, total, rel)
+            chunks = _iso_chunks(f, entry[1], entry[2]) if entry[0] == 'iso' else _file_chunks(entry)
+            n, got = _copy_hash(chunks, out)
+            res.checked += 1
+            done += size
+            if n != size or got != sha:
+                res.bad.append(rel)
+        if res.bad or res.missing:
+            bits = []
+            if res.bad: bits.append(f'{len(res.bad)} file(s) do not match a clean disc (first: {res.bad[0]})')
+            if res.missing: bits.append(f'{len(res.missing)} file(s) are missing (first: {res.missing[0]})')
+            res.message = ('This copy is damaged or modified: ' + '; '.join(bits) +
+                           '. Make a fresh dump of your disc and try again.')
+            return res
+        res.ok = True
+        res.message = f'{info.message} Extracted {", ".join(wanted)} to {res.dest}.'
+        return res
+    except Exception as e:
+        return Result(False, f'Extract failed: {e}')
+    finally:
+        if f:
+            f.close()
+
+
 def verify_folder(path, progress=None):
     """Check an extracted folder (or image) in place, writing nothing."""
     return _run(path, '', progress, False)
@@ -391,7 +451,12 @@ def is_imported(dest):
 def main(argv):
     as_json = '--json' in argv
     args = [a for a in argv if a != '--json']
-    if len(args) < 2 or args[0] not in ('identify', 'import', 'verify') or (args[0] == 'import' and len(args) < 3):
+    only = 'sys/main.dol'
+    if '--only' in args:
+        only = args[args.index('--only') + 1]
+        del args[args.index('--only'):args.index('--only') + 2]
+    if len(args) < 2 or args[0] not in ('identify', 'import', 'verify', 'extract') or \
+            (args[0] in ('import', 'extract') and len(args) < 3):
         print(__doc__)
         return 2
     last = [0.0]
@@ -406,6 +471,8 @@ def main(argv):
         r = identify(args[1])
     elif args[0] == 'verify':
         r = verify_folder(args[1], progress)
+    elif args[0] == 'extract':
+        r = extract_files(args[1], args[2], tuple(x.strip() for x in only.split(',') if x.strip()), progress)
     else:
         r = import_disc(args[1], args[2], progress)
     if not as_json and args[0] != 'identify':

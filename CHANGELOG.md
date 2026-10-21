@@ -9,6 +9,8 @@
 - ETC2 textures on Android: textures the console stored block-compressed (CMPR) are re-encoded to ETC2 instead of being
   uploaded as 32-bit RGBA8, four to eight times less texture memory and texture bandwidth (EAC alpha only when a
   texture actually uses its alpha channel).
+- The APK can be built on GitHub Actions from a link you paste when you start the run - an ISO/GCM image, an archive
+  holding `generated/` or a disc folder, or `main.dol` alone. No secret, no local NDK.
 - The Android build is built and packaged by GitHub Actions on every push (`.github/workflows/android-apk.yml`): the
   disc-free tests, a full arm64 compile of the native port, and an installable launcher-only APK. Set the
   `SHADOW_GEN_URL` secret to your own `generated/` tarball and the same job builds the real APK.
