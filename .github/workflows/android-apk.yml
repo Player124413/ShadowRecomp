@@ -51,7 +51,8 @@ env:
   NDK_VERSION: 27.0.12077973
   SDK_PLATFORM: 35
   BUILD_TOOLS: 35.0.0
-  # Installed from the SDK by the jobs that run Gradle; the compile job uses the runner's own CMake + Ninja.
+  # Installed from the SDK by the APK job (it brings Ninja along); the CMake that actually does the work is the runner's
+  # own, which is newer than this - see the "Let Gradle use this machine's CMake" step. The compile job uses its own.
   SDK_CMAKE: 3.22.1
 
 jobs:
@@ -263,16 +264,38 @@ jobs:
         with:
           packages: 'platforms;android-${{ env.SDK_PLATFORM }} build-tools;${{ env.BUILD_TOOLS }} ndk;${{ env.NDK_VERSION }} cmake;${{ env.SDK_CMAKE }}'
 
+      - name: Let Gradle use this machine's CMake
+        # The project needs CMake 3.28+ (FetchContent options, find_package GLOBAL). The SDK's CMake package is older than
+        # that, and what the runner already has is new enough - so point Gradle's CMake locator at it by hand.
+        run: |
+          cmake --version | head -1
+          echo "cmake.dir=$(dirname "$(dirname "$(command -v cmake)")")" >> android/local.properties
+          cat android/local.properties
+
       - name: Build the APK
         env:
           # Keep Gradle and the Android build files in the workspace, and let the build use a .gradle-dist download.
           GRADLE_OPTS: -Dorg.gradle.daemon=false
-          # The Gradle project asks for CMake 3.25.1; the SDK package that actually exists is 3.22.1. AGP is happy with
-          # either, so tell it which one is installed here. The second flag is what makes the launcher-only APK link.
+          # The launcher-only build links the stand-in game code (see the job's comment at the top of the file).
           SHADOW_GRADLE_ARGS: -Pshadow.cmake=${{ env.SDK_CMAKE }} -Pshadow.stubGameCode=${{ steps.gamecode.outputs.have == 'yes' && 'OFF' || 'ON' }}
         run: |
+          set +e
           chmod +x android/build.sh
-          cd android && ./build.sh debug
+          (cd android && ./build.sh debug) 2>&1 | tee apk-build.log
+          status=${PIPESTATUS[0]}
+          echo "build.sh exit: $status"
+          # Same reasoning as in the compile job: the annotations are the readable channel, the log is an artifact.
+          python3 tools/android/ci_errors.py apk-build.log --keywords
+          exit $status
+
+      - name: Upload the build log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: apk-build-log
+          path: apk-build.log
+          if-no-files-found: ignore
+          retention-days: 14
 
       - name: Upload the APK
         uses: actions/upload-artifact@v4

@@ -16,6 +16,7 @@ text with --report for the job summary.
 
 Usage: ci_errors.py build.log [--limit N] [--report]
        ci_errors.py configure.log --configure
+       ci_errors.py apk-build.log --keywords
 Without --report it prints the ::error:: workflow commands (the annotations); with it, the same findings as readable
 text for the job summary instead.
 """
@@ -152,6 +153,26 @@ def configure_report(lines: list[str]) -> str:
     return text
 
 
+def keyword_report(lines: list[str]) -> str:
+    """The reason a Gradle/CMake/NDK build stopped, when it was not a plain compiler log."""
+    markers = [index for index, line in enumerate(lines)
+               if re.match(r"^(FAILURE: Build failed|\* What went wrong:|CMake Error|ninja: build stopped)", line.strip())]
+    body: list[str] = []
+    if markers:
+        first = markers[0]
+        body.extend(line.rstrip() for line in lines[first:first + 70])
+    errors = [line.rstrip() for line in lines if re.search(r"error:|Error:|error ", line)][-15:]
+    if errors:
+        body.append("")
+        body.append("... error lines:")
+        body.extend(errors)
+    if not body:
+        body.extend(line.rstrip() for line in lines[-30:])
+    text = "\n".join(body)
+    text = re.sub(r"\n{3,}", "\n\n", text)
+    return text if len(text) <= MAX_MESSAGE else text[:MAX_MESSAGE] + "\n... (truncated)"
+
+
 def main(argv: list[str]) -> int:
     if len(argv) < 2:
         print(__doc__.strip().splitlines()[0])
@@ -163,6 +184,7 @@ def main(argv: list[str]) -> int:
         limit = int(argv[argv.index("--limit") + 1])
     report_only = "--report" in argv
     configure_mode = "--configure" in argv
+    keyword_mode = "--keywords" in argv
     if not os.path.exists(path):
         print(f"::warning ::{escape(path)} was never written, so the compiler produced no output to report")
         return 0
@@ -172,6 +194,9 @@ def main(argv: list[str]) -> int:
 
     if configure_mode:
         print(f"::error title=cmake ::{escape(configure_report(lines))}")
+        return 0
+    if keyword_mode:
+        print(f"::error title=build ::{escape(keyword_report(lines))}")
         return 0
 
     seen: set[str] = set()
