@@ -938,7 +938,7 @@ uint64_t signature(const fs::path& root) {
        !ec && it != fs::recursive_directory_iterator(); it.increment(ec)) {
     if (!it->is_regular_file(ec)) continue;
     auto mix = [&](uint64_t v) { h = (h ^ v) * 1099511628211ull; };
-    for (wchar_t c : it->path().native()) mix(c);
+    for (wchar_t c : it->path().wstring()) mix(c);   // wide on every platform, unlike native()
     mix(it->file_size(ec));
     mix((uint64_t)it->last_write_time(ec).time_since_epoch().count());
   }
@@ -972,10 +972,10 @@ PackScan scan_pack() {
     if (!it->is_regular_file(ec) || it->path().filename().string().ends_with(".tmp.png")) continue;
     const fs::path p = it->path();
     const auto stamp = file_stamp(p);
-    for (wchar_t c : p.native()) scan.signature = (scan.signature ^ c) * 1099511628211ull;
+    for (wchar_t c : p.wstring()) scan.signature = (scan.signature ^ c) * 1099511628211ull;
     scan.signature = (scan.signature ^ stamp) * 1099511628211ull;
     const std::string key = key_of(p);
-    if (!key.empty()) scan.loose.emplace(p.native(), LooseFile{p, key, stamp});
+    if (!key.empty()) scan.loose.emplace(p.wstring(), LooseFile{p, key, stamp});
     else other.push_back({p, stamp});
     cards |= lower(p.filename().string()).ends_with(".cards.txt");
   }
@@ -984,7 +984,7 @@ PackScan scan_pack() {
     for (const MasterLayout& m : g_layout_masters)
       dependency |= lower(p.stem().string()) == lower(m.name);
     if (!dependency) continue;  // split-group sources and PC overlay assets are not texture registrations
-    for (wchar_t c : p.native()) scan.complex = (scan.complex ^ c) * 1099511628211ull;
+    for (wchar_t c : p.wstring()) scan.complex = (scan.complex ^ c) * 1099511628211ull;
     scan.complex = (scan.complex ^ stamp) * 1099511628211ull;
   }
   return scan;
@@ -1040,7 +1040,7 @@ void load() {
     auto r = aurora::texture::register_virtual_replacement(v, src);
     if (r.id) {
       g_regs.push_back(r);
-      g_loose.emplace(p.native(), LooseReg{v, r, file_stamp(p)});
+      g_loose.emplace(p.wstring(), LooseReg{v, r, file_stamp(p)});
     }
   }
   // UI masters: every texture built from a master that is present

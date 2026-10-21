@@ -114,6 +114,12 @@ def notes(block: list[str], index: int) -> list[str]:
     return tail
 
 
+def translation_unit(command: str) -> str:
+    """The file being compiled, so two identical system-header errors in different files both get reported."""
+    match = re.search(r"(?:^|\s)-c\s+(\S+)", command)
+    return os.path.basename(match.group(1)) if match else ""
+
+
 def message(block: list[str], index: int, command: str) -> str:
     parts = [block[index].rstrip()]
     parts.extend(notes(block, index))
@@ -176,7 +182,9 @@ def main(argv: list[str]) -> int:
         for index, line in enumerate(block):
             if not ERROR_RE.search(line) or line.lstrip().startswith("ninja:"):
                 continue
-            key = re.sub(r":\d+:\d+", "", line)     # the same complaint about the same file twice is one complaint
+            # The same complaint about the same file is one complaint; the same libc++ error in two translation units is
+            # two, because each one has its own instantiation chain.
+            key = translation_unit(command) + "|" + re.sub(r":\d+:\d+", "", line)
             if key in seen:
                 continue
             seen.add(key)
