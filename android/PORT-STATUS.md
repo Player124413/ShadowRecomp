@@ -21,6 +21,8 @@ with a finger. No game files are in the repository.
 | Build one command | `android/build.sh` | JDK/SDK/Gradle discovery, `tools/gen.py` check, APK path printed |
 | Frame pacing | `runtime/frame_rate.cpp` | sleeps to the frame deadline on Android instead of spinning (FR_NO_PACE=1 A/B) |
 | Fonts | `runtime/game_menu.cpp` | the phone's own Roboto when the Windows fonts are absent (menu stays readable) |
+| ETC2 textures | `third_party/aurora/lib/gfx/etc2_encode.cpp`, `etc2_transcode.cpp` | CMPR (BC1) textures are decoded to RGBA8 as before and then re-encoded to ETC2 instead of being uploaded as 32-bit RGBA8: 4 bits per pixel instead of 32, plus an EAC alpha block only when the texture uses alpha. Falls back to RGBA8 when the adapter has no `TextureCompressionETC2` or the format is not worth the loss. `SHADOW_ETC2=1` forces every RGB source through it, `=0` turns it off; the running total is logged (`aurora::etc2`) |
+| CI | `.github/workflows/android-apk.yml`, `tools/android/stub_generated.py` | GitHub Actions: the disc-free tests, a full arm64 compile of the native port without the disc, and the APK build when the game code is available |
 
 ## Verified here, and what still needs a device
 
@@ -34,7 +36,9 @@ Checked in the development sandbox (no NDK, no JDK, no Gradle):
 * the CMake `ANDROID` branch configures end to end (`cmake -DCMAKE_TOOLCHAIN_FILE=<fake>` with stubbed Aurora/SDL), so
   `libmain.so` + `libSDL3.so` reaching `jniLibs/` and the Java copy step both work;
 * the Java parses (javalang) and matches SDL3's `SDLActivity` API (`getLibraries`, `getArguments`, `createSDLSurface`);
-* `tools/android/touch_layout_test.cpp` passes.
+* `tools/android/touch_layout_test.cpp` passes;
+* the ETC2 encoder's blocks decode correctly in `texture2ddecoder`, an independent implementation: 37 dB on a smooth
+  gradient, 55 dB on an alpha ramp, ~10-12 dB on UI art and noise (that is the format, not a bug - see below).
 
 The first real build (`android/build.sh`) and the first boot are still to be done on a machine with the NDK; treat that
 as the next step, and expect small portability fixes in Dawn's Android linkage and in SDL3's Java package copy.
@@ -43,11 +47,13 @@ as the next step, and expect small portability fixes in Dawn's Android linkage a
 
 1. **On-device build pass.** `android/build.sh`, then the first boot, then fix what the device says (logcat: `SDL`,
    `ShadowRecomp`).
-2. **ETC2.** Right now textures are unpacked to RGBA8 before upload (CMPR/BC1 → RGBA8 in `texture_convert.cpp`). On a
-   phone that is 4x the texture bandwidth of a console, and bandwidth is the mobile bottleneck. The plan: decode
-   BC1 → RGBA8 → re-encode to ETC2 (a BC1→ETC2 transcoder or a small encoder) at load time and upload as
-   `ETC2RGB8`/`ETC2RGBA8` where WebGPU exposes it, keeping RGBA8 as the fallback for the desktop and for odd formats.
-   This is the biggest single remaining performance item and the only one that touches the renderer.
+2. **ETC2 quality: the extra modes.** Done and on by default (above), but the encoder only uses ETC1's two modes
+   (individual and differential) plus EAC alpha. ETC2's T, H and planar modes are what etcpak uses to get its quality,
+   and the gap is measurable: on synthetic 128x128 images, decoded by the same independent decoder, ours is 41.7 dB
+   against etcpak's 49.8 dB on a gradient and 11.6 vs 14.7 dB on two-tone art. Worth doing (UI art in this game is
+   exactly the two-tone case), not urgent: the default path only re-encodes textures that were *already* BC1 on the
+   console, so it does not add new loss of the kind a fresh RGBA8 source would. `tools/android/etc2_check.py` guards
+   the current numbers, `/tmp` benchmark scripts aside, so a mode can be added and measured before it is trusted.
 3. **Frame pacing and thermals.** The main loop spins in the game's own frame wait; on a phone that is heat, and heat
    is lost frames after a few minutes. A short sleep when the frame is ahead of its deadline (and a check that
    `present` blocks on the display) is the fix — small, but it must be measured on a device, not guessed.
@@ -59,6 +65,12 @@ as the next step, and expect small portability fixes in Dawn's Android linkage a
 
 ## Testing without a phone
 
+* `python3 tools/android/stub_generated.py` writes a stand-in `generated/` (declarations only) so the native port can
+  be *compiled* on a machine without the disc; `.github/workflows/android-apk.yml` does exactly that for arm64 on
+  every push, and builds the APK when `SHADOW_GEN_URL` (see `android/README.md`) points at the game code.
+* `tools/android/etc2_check.cpp` + `etc2_check.py` — the ETC2 encoder against an independent decoder:
+  `g++ -std=c++20 -Ithird_party/aurora/lib tools/android/etc2_check.cpp third_party/aurora/lib/gfx/etc2_encode.cpp -o t
+  && ./t blocks.bin && python3 tools/android/etc2_check.py blocks.bin` (needs `pip install texture2ddecoder`).
 * `tools/android/touch_layout_test.cpp` — the layout format, presets, round trip, damaged files, hit testing:
   `g++ -std=c++20 -Iruntime tools/android/touch_layout_test.cpp runtime/touch_layout.cpp -o t && ./t`
 * The launcher passes only command-line arguments (`--disc`, `--perf`, `--render-scale`, `--touch`, `--edit-touch`,

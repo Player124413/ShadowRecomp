@@ -28,6 +28,11 @@ TextureFormatInfo format_info(wgpu::TextureFormat format) noexcept {
     return {1, 1, 4, false};
   case wgpu::TextureFormat::BC1RGBAUnorm:
     return {4, 4, 8, true};
+  case wgpu::TextureFormat::ETC2RGB8Unorm:
+  case wgpu::TextureFormat::ETC2RGB8A1Unorm:
+    return {4, 4, 8, true};
+  case wgpu::TextureFormat::ETC2RGBA8Unorm:
+    return {4, 4, 16, true};
   case wgpu::TextureFormat::BC3RGBAUnorm:
   case wgpu::TextureFormat::BC5RGUnorm:
   case wgpu::TextureFormat::BC7RGBAUnorm:

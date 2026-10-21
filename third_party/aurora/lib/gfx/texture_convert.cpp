@@ -1,5 +1,7 @@
 #include "texture_convert.hpp"
 
+#include "etc2_transcode.hpp"
+
 #include "../internal.hpp"
 #include "../gx/gx_fmt.hpp"
 
@@ -572,9 +574,31 @@ static ByteBuffer BuildRGBA8FromBC1(uint32_t width, uint32_t height, uint32_t mi
   return buf;
 }
 
+// ETC2: after the source format has been expanded to RGBA8, put it back into a block-compressed format the phone can
+// sample natively. Keeps 4 bpp instead of 32, which is the single biggest memory/bandwidth win on mobile.
+ConvertedTexture convert_texture_to_etc2(wgpu::TextureFormat srcFormat, uint32_t width, uint32_t height, uint32_t mips,
+                                         ByteBuffer&& rgba, bool& hasArbitraryMips) {
+  ZoneScoped;
+  etc2::Result etc2 = etc2::transcode(width, height, mips, rgba);
+  if (etc2.data.size() == 0) {
+    // Out of memory or a size the encoder cannot represent: fall back to the uncompressed result, never fail.
+    hasArbitraryMips = mips > 1 && arb_mip_check(width, height, mips, rgba);
+    return {.format = srcFormat, .width = width, .height = height, .mips = mips, .data = std::move(rgba)};
+  }
+  hasArbitraryMips = false;
+  return {
+      .format = etc2.hasAlpha ? wgpu::TextureFormat::ETC2RGBA8Unorm : wgpu::TextureFormat::ETC2RGB8Unorm,
+      .width = width,
+      .height = height,
+      .mips = mips,
+      .data = std::move(etc2.data),
+  };
+}
+
 ConvertedTexture convert_texture(u32 format, uint32_t width, uint32_t height, uint32_t mips, ArrayRef<uint8_t> data) {
   ZoneScoped;
   ByteBuffer converted;
+  const bool toEtc2 = etc2::wants(format);
   switch (format) {
     DEFAULT_FATAL("convert_texture: unknown texture format {}", format);
   case GX_TF_R8_PC:
@@ -632,6 +656,12 @@ ConvertedTexture convert_texture(u32 format, uint32_t width, uint32_t height, ui
   case GX_TF_CMPR:
     converted = BuildRGBA8FromCMPR(width, height, mips, data);
     break;
+  }
+  if (toEtc2 && converted.size() != 0) {
+    bool hasArbitraryMips = false;
+    auto result = convert_texture_to_etc2(to_wgpu(format), width, height, mips, std::move(converted), hasArbitraryMips);
+    result.hasArbitraryMips = hasArbitraryMips;
+    return result;
   }
   const auto wgpuFormat = to_wgpu(format);
   bool hasArbitraryMips = false;

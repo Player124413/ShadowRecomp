@@ -13,6 +13,8 @@ add_library(aurora_gx STATIC
         lib/gfx/texture.cpp
         lib/gfx/texture_format.cpp
         lib/gfx/texture_convert.cpp
+        lib/gfx/etc2_encode.cpp
+        lib/gfx/etc2_transcode.cpp
         lib/gfx/texture_replacement.cpp
         lib/gx/attr_fmt.cpp
         lib/gx/command_processor.cpp

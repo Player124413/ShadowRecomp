@@ -9,6 +9,10 @@
 
 # --- top level: the build ------------------------------------------------------------------------
 !/.gitignore
+# GitHub Actions: the Android build lives there (no game files, only build recipes)
+!/.github/
+!/.github/workflows/
+!/.github/workflows/android-apk.yml
 !/.gitattributes
 !/README.md
 !/CHANGELOG.md

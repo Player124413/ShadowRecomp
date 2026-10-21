@@ -105,7 +105,10 @@ case "$task" in
       say "note: Dawn has a prebuilt Android library for arm64 only;"
       say "      any other ABI makes the first build compile Dawn from source (long, ~10 GB)."
     fi
-    "$gradle_bin" --no-daemon "$target"
+    # Extra Gradle arguments when someone needs them, e.g. SHADOW_GRADLE_ARGS=-Pshadow.cmake=3.22.1 (CI does this for the
+    # CMake version the SDK actually ships).
+    # shellcheck disable=SC2086
+    "$gradle_bin" --no-daemon "$target" ${SHADOW_GRADLE_ARGS:-}
     apk="$(find app/build/outputs/apk -name "*-$task.apk" | head -1 || true)"
     [ -n "$apk" ] || die "the build finished but no APK was found"
     say "APK: $here/$apk"

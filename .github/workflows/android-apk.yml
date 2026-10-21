@@ -1,0 +1,219 @@
+name: Android APK
+
+# Builds the 64-bit Android port on GitHub's machines, so nobody has to keep a full NDK toolchain around to find out
+# whether the port still compiles.
+#
+# Three jobs, deliberately separate, because they need different things:
+#
+#   checks        - the disc-free tests that live in tools/android/ (touch layout, ETC2 encoder, the Java sources).
+#                   Needs nothing but g++/python, so it always runs and always means something.
+#   compile       - compiles the whole native port (runtime + Aurora + the Android glue) for arm64 with the real NDK,
+#                   WITHOUT the game code: tools/android/stub_generated.py stands in for generated/, and every object
+#                   file is built while the link is left out. This is the check that catches "it stopped building".
+#   apk           - the actual installable APK. It needs the recompiled game code, which only exists on the machine of
+#                   someone who owns the disc, so this job runs only when the repository has that code to hand: set the
+#                   SHADOW_GEN_URL secret to a .tar.gz of your generated/ folder (see android/README.md). Without it the
+#                   job says so and skips instead of failing.
+#
+# Nothing here touches the game's data: the disc image, the DOL and generated/ are never committed, and the APK artifact
+# contains the recompiled code, not the disc.
+
+on:
+  push:
+    branches: [main, 'arena/**']
+    paths:
+      - 'runtime/**'
+      - 'android/**'
+      - 'third_party/aurora/**'
+      - 'tools/android/**'
+      - 'CMakeLists.txt'
+      - 'VERSION'
+      - '.github/workflows/android-apk.yml'
+  pull_request:
+    paths:
+      - 'runtime/**'
+      - 'android/**'
+      - 'third_party/aurora/**'
+      - 'tools/android/**'
+      - 'CMakeLists.txt'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: android-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  NDK_VERSION: 27.0.12077973
+  SDK_PLATFORM: 35
+  BUILD_TOOLS: 35.0.0
+  # Installed from the SDK by the jobs that run Gradle; the compile job uses the runner's own CMake + Ninja.
+  SDK_CMAKE: 3.22.1
+
+jobs:
+  checks:
+    name: Disc-free tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Python tools parse
+        run: python3 -m py_compile tools/gen.py tools/dol.py tools/lift.py tools/android/stub_generated.py
+
+      - name: Java sources parse
+        run: |
+          python3 -m pip install --quiet javalang
+          python3 - <<'PY'
+          import glob, sys, javalang
+          ok = True
+          for path in sorted(glob.glob('android/app/src/main/java/**/*.java', recursive=True)):
+              if '/org/' in path or '/dev/encounter/' in path:      # SDL3's and Aurora's, copied in by CMake
+                  continue
+              try:
+                  javalang.parse.parse(open(path, encoding='utf-8').read())
+                  print('ok  ', path)
+              except Exception as e:
+                  ok = False
+                  print('FAIL', path, e)
+          sys.exit(0 if ok else 1)
+          PY
+
+      - name: Touch layout round-trip
+        run: |
+          g++ -std=c++20 -O2 -Wall -Wextra -Iruntime runtime/touch_layout.cpp tools/android/touch_layout_test.cpp \
+              -o /tmp/touch_layout_test
+          /tmp/touch_layout_test
+
+      - name: ETC2 encoder (decoded by an independent decoder)
+        run: |
+          python3 -m pip install --quiet texture2ddecoder
+          g++ -std=c++20 -O2 -Wall -Wextra -Ithird_party/aurora/lib \
+              tools/android/etc2_check.cpp third_party/aurora/lib/gfx/etc2_encode.cpp -o /tmp/etc2_check
+          /tmp/etc2_check /tmp/etc2_blocks.bin
+          python3 tools/android/etc2_check.py /tmp/etc2_blocks.bin
+
+      - name: This workflow parses
+        run: |
+          python3 -m pip install --quiet pyyaml
+          python3 -c "import yaml,sys; yaml.safe_load(open('.github/workflows/android-apk.yml')); print('yaml ok')"
+
+  compile:
+    name: Compile the native port (arm64, no game code)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Android SDK, NDK and CMake
+        uses: android-actions/setup-android@v3
+        with:
+          packages: 'platforms;android-${{ env.SDK_PLATFORM }} build-tools;${{ env.BUILD_TOOLS }} ndk;${{ env.NDK_VERSION }}'
+
+      - name: Stand-in generated/ (the disc's code is not in the repository)
+        run: python3 tools/android/stub_generated.py
+
+      - name: Configure for arm64
+        run: |
+          cmake -S . -B build-android -G Ninja \
+            -DCMAKE_TOOLCHAIN_FILE="$ANDROID_HOME/ndk/$NDK_VERSION/build/cmake/android.toolchain.cmake" \
+            -DANDROID_ABI=arm64-v8a \
+            -DANDROID_PLATFORM=android-26 \
+            -DANDROID_STL=c++_static \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
+          # Every translation unit the build knows about, as a build target, so we can compile them all and skip the
+          # link: linking needs the recompiled game functions, which only the disc can produce.
+          python3 - <<'PY' > objects.txt
+          import json
+          seen = set()
+          for entry in json.load(open('build-android/compile_commands.json')):
+              out = entry.get('output')
+              if out and out not in seen:
+                  seen.add(out)
+                  print(out)
+          PY
+          wc -l < objects.txt | xargs echo "translation units:"
+
+      - name: Compile everything (the link is deliberately not attempted)
+        run: xargs -a objects.txt ninja -C build-android -k 0
+
+      - name: Say what was proven
+        run: |
+          echo "All native sources compiled for arm64-v8a with NDK $NDK_VERSION."
+          echo "Not linked and not packaged: that needs generated/ from python tools/gen.py (your own disc)."
+
+  apk:
+    name: Build the APK
+    runs-on: ubuntu-latest
+    needs: [checks, compile]
+    steps:
+      - uses: actions/checkout@v4
+
+      - id: gamecode
+        name: Is the recompiled game code available?
+        env:
+          GEN_URL: ${{ secrets.SHADOW_GEN_URL }}
+        run: |
+          if [ -n "$GEN_URL" ]; then
+            echo "have=yes" >> "$GITHUB_OUTPUT"
+          else
+            echo "have=no" >> "$GITHUB_OUTPUT"
+            echo "::notice::No SHADOW_GEN_URL secret, so there is no game code to link and no APK can be built here." \
+                 "Run 'python tools/gen.py' on a machine with your disc, tar up generated/, host the tarball and set" \
+                 "SHADOW_GEN_URL to its (private) URL - see android/README.md."
+          fi
+
+      - name: Fetch and unpack generated/
+        if: steps.gamecode.outputs.have == 'yes'
+        env:
+          GEN_URL: ${{ secrets.SHADOW_GEN_URL }}
+        run: |
+          set -euo pipefail
+          curl -fsSL --retry 3 -o /tmp/generated.tar.gz "$GEN_URL"
+          mkdir -p generated
+          tar -xzf /tmp/generated.tar.gz -C generated --strip-components=1 \
+            || tar -xzf /tmp/generated.tar.gz -C generated        # also accept a tarball without a top folder
+          test -f generated/files.cmake || { echo "generated/files.cmake missing from the tarball"; exit 1; }
+
+      - uses: actions/setup-java@v4
+        if: steps.gamecode.outputs.have == 'yes'
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Android SDK, NDK and CMake
+        if: steps.gamecode.outputs.have == 'yes'
+        uses: android-actions/setup-android@v3
+        with:
+          packages: 'platforms;android-${{ env.SDK_PLATFORM }} build-tools;${{ env.BUILD_TOOLS }} ndk;${{ env.NDK_VERSION }} cmake;${{ env.SDK_CMAKE }}'
+
+      - name: Build the APK
+        if: steps.gamecode.outputs.have == 'yes'
+        env:
+          # Keep Gradle and the Android build files in the workspace, and let the build use a .gradle-dist download.
+          GRADLE_OPTS: -Dorg.gradle.daemon=false
+          # The Gradle project asks for CMake 3.25.1; the SDK package that actually exists is 3.22.1. AGP is happy with
+          # either, so tell it which one is installed here.
+          SHADOW_GRADLE_ARGS: -Pshadow.cmake=${{ env.SDK_CMAKE }}
+        run: |
+          chmod +x android/build.sh
+          cd android && ./build.sh debug
+
+      - name: Upload the APK
+        if: steps.gamecode.outputs.have == 'yes'
+        uses: actions/upload-artifact@v4
+        with:
+          name: shadowrecomp-android-arm64-debug
+          path: android/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+          retention-days: 30

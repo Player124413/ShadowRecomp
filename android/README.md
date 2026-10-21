@@ -54,6 +54,29 @@ adb logcat -s ShadowRecomp SDL
 ships a prebuilt library for. Adding `x86_64` (the emulator) makes the first build compile Dawn from source, which is
 long and wants about 10 GB — do it only if you need it.
 
+## Build on GitHub Actions
+
+`.github/workflows/android-apk.yml` builds on every push that touches the port, in three jobs:
+
+| Job | What it does | Needs |
+| --- | --- | --- |
+| `checks` | the disc-free tests (`tools/android/`): ETC2 encoder against an independent decoder, the touch layout, the Java sources | nothing |
+| `compile` | compiles **every** native file for `arm64-v8a` with the real NDK. `tools/android/stub_generated.py` writes a stand-in `generated/`, so nothing needs the disc; the link step is deliberately not attempted | nothing |
+| `apk` | the installable APK | the recompiled game code |
+
+The APK job cannot invent the game: `generated/` is code from your own `main.dol`. To let it build, put that folder in
+a tarball once and point a repository secret at it:
+
+```sh
+tar -czf generated.tar.gz generated/                     # on the machine that ran tools/gen.py
+# upload it somewhere private (a release asset, a private gist, S3 with a signed URL...) and then:
+#   Settings → Secrets and variables → Actions → New repository secret
+#   name: SHADOW_GEN_URL   value: <the URL>
+```
+
+Without the secret the job says so and skips, and the other two still run — which is the point: they are the ones that
+tell you the port still builds. Keep it private: that tarball is the game's compiled code.
+
 ## First run
 
 1. The launcher opens. **Import disc image…** → pick your own ISO/GCM. It is checked on the spot (GameCube magic,
@@ -101,7 +124,10 @@ The target is a locked 60 fps, so the port is built for it rather than tuned aft
   (performance), 720p (balanced) or native (quality);
 * frame pacing sleeps to the frame's deadline instead of spinning the game's frame wait (a phone core burned per
   frame is heat, and heat is a lost frame budget a few minutes in) — `FR_NO_PACE=1` on a device turns it off to compare;
-* ETC2 is the mobile texture format; the APK requires a GLES3 / Vulkan-class device, where it is guaranteed;
+* ETC2 is the mobile texture format, and the port uses it: console textures that were BC1 (CMPR) are re-encoded to
+  ETC2 at load time and uploaded at 4 bits per pixel instead of 32, with an EAC alpha block only when the texture has
+  alpha (`SHADOW_ETC2=1` forces it for all RGB sources, `=0` turns it off). The APK requires a GLES3 / Vulkan-class
+  device, where ETC2 is guaranteed;
 * Dawn renders through Vulkan, libc++ is linked statically, and the audio stream keeps SDL's own device buffering.
 
 The launcher's settings travel as command-line arguments (`--disc`, `--perf`, `--render-scale`, `--touch`,
