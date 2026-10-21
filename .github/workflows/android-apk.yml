@@ -145,7 +145,25 @@ jobs:
           wc -l < objects.txt | xargs echo "translation units:"
 
       - name: Compile everything (the link is deliberately not attempted)
-        run: xargs -a objects.txt ninja -C build-android -k 0
+        run: |
+          set +e
+          xargs -a objects.txt ninja -C build-android -k 0 > build.log 2>&1
+          status=$?
+          echo "ninja exit: $status"
+          # Surface the compiler's complaints where they can be read without downloading a log: the check run's
+          # annotations, and the job's own summary page.
+          grep -E "(error|Error):" build.log | head -40 | while IFS= read -r line; do
+            printf '::error ::%s\n' "$(printf '%s' "$line" | tr -d '\r' | head -c 800)"
+          done
+          {
+            echo "### Native compile (arm64-v8a)"
+            echo
+            echo '```'
+            grep -E "(error|Error):" build.log | head -60 || echo "(no error: lines)"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          tail -40 build.log
+          exit $status
 
       - name: Say what was proven
         run: |
