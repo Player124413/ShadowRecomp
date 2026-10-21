@@ -125,9 +125,25 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Android SDK, NDK and CMake
-        uses: android-actions/setup-android@v3
-        with:
-          packages: 'platforms;android-${{ env.SDK_PLATFORM }} build-tools;${{ env.BUILD_TOOLS }} ndk;${{ env.NDK_VERSION }}'
+        # Done with sdkmanager directly rather than an action, because a download that fails once should be retried
+        # instead of costing a whole run (the runner already has the SDK and the command-line tools).
+        run: |
+          set -uo pipefail
+          sdkmanager="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-$HOME/android-sdk}}/cmdline-tools/latest/bin/sdkmanager"
+          if [ ! -x "$sdkmanager" ]; then
+            echo "::error ::no sdkmanager at $sdkmanager"
+            ls -la "${ANDROID_HOME:-${ANDROID_SDK_ROOT:-/nonexistent}}" || true
+            exit 1
+          fi
+          yes 2>/dev/null | "$sdkmanager" --licenses >/dev/null 2>&1 || true
+          ok=0
+          for attempt in 1 2 3; do
+            if "$sdkmanager" --install "ndk;${{ env.NDK_VERSION }}"; then ok=1; break; fi
+            echo "sdkmanager failed (attempt $attempt of 3), retrying in 20 s"
+            sleep 20
+          done
+          [ "$ok" = "1" ] || { echo "::error ::the Android SDK packages could not be installed"; exit 1; }
+          echo "ANDROID_HOME=$ANDROID_HOME"
 
       - name: Stand-in generated/ (the disc's code is not in the repository)
         run: python3 tools/android/stub_generated.py
@@ -260,9 +276,25 @@ jobs:
           java-version: '17'
 
       - name: Android SDK, NDK and CMake
-        uses: android-actions/setup-android@v3
-        with:
-          packages: 'platforms;android-${{ env.SDK_PLATFORM }} build-tools;${{ env.BUILD_TOOLS }} ndk;${{ env.NDK_VERSION }} cmake;${{ env.SDK_CMAKE }}'
+        # Done with sdkmanager directly rather than an action, because a download that fails once should be retried
+        # instead of costing a whole run (the runner already has the SDK and the command-line tools).
+        run: |
+          set -uo pipefail
+          sdkmanager="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-$HOME/android-sdk}}/cmdline-tools/latest/bin/sdkmanager"
+          if [ ! -x "$sdkmanager" ]; then
+            echo "::error ::no sdkmanager at $sdkmanager"
+            ls -la "${ANDROID_HOME:-${ANDROID_SDK_ROOT:-/nonexistent}}" || true
+            exit 1
+          fi
+          yes 2>/dev/null | "$sdkmanager" --licenses >/dev/null 2>&1 || true
+          ok=0
+          for attempt in 1 2 3; do
+            if "$sdkmanager" --install "platforms;android-${{ env.SDK_PLATFORM }}" "build-tools;${{ env.BUILD_TOOLS }}" "ndk;${{ env.NDK_VERSION }}" "cmake;${{ env.SDK_CMAKE }}"; then ok=1; break; fi
+            echo "sdkmanager failed (attempt $attempt of 3), retrying in 20 s"
+            sleep 20
+          done
+          [ "$ok" = "1" ] || { echo "::error ::the Android SDK packages could not be installed"; exit 1; }
+          echo "ANDROID_HOME=$ANDROID_HOME"
 
       - name: Let Gradle use this machine's CMake
         # The project needs CMake 3.28+ (FetchContent options, find_package GLOBAL). The SDK's CMake package is older than
