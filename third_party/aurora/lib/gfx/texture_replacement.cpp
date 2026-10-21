@@ -772,7 +772,7 @@ std::optional<gfx::dds::MipTail> load_thumbnail(const EntryLoadSnapshot& entry) 
 }
 
 void worker_main(thread::StopToken token) {
-  std::stop_callback notifyOnStop{token, [] { s_jobCv.notify_all(); }};
+  thread::StopCallback notifyOnStop{token, [] { s_jobCv.notify_all(); }};
   while (true) {
     LoadJob job;
     {
