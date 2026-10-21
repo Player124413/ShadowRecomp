@@ -133,7 +133,7 @@ jobs:
             -DCMAKE_EXPORT_COMPILE_COMMANDS=ON 2>&1 | tee configure.log
           # Which of the third-party dependencies were found on the machine and which had to be fetched: put the
           # interesting lines in the annotations, because the configure log itself is not readable everywhere.
-          grep -E "aurora: (Using|Fetching)" configure.log | sort -u | head -8 | while IFS= read -r line; do
+          grep -E "(aurora|shadow): (Using|Fetching|sqlite3)" configure.log | sort -u | head -8 | while IFS= read -r line; do
             printf '::notice ::%s\n' "$(printf '%s' "$line" | sed 's/^-- //' | head -c 300)"
           done
           # Every translation unit the build knows about, as a build target, so we can compile them all and skip the

@@ -23,6 +23,28 @@ if(ANDROID)
 endif()
 add_subdirectory(third_party/aurora ${CMAKE_BINARY_DIR}/aurora EXCLUDE_FROM_ALL)
 
+# sqlite3 backs Aurora's pipeline and texture caches. Aurora looks for it in three ways - an installed package, a
+# pkg-config file, or fetching the SQLite amalgamation - but if all three come up empty, `target_link_libraries(... sqlite3)`
+# does not fail at configure time: the name is then taken as a plain library (`-lsqlite3`) and the sources that include
+# <sqlite3.h> fail to compile with "file not found". That is what happened on the Android CI machine. So check here and
+# fetch the amalgamation ourselves in that case; the include directory is then ours to set.
+if(TARGET sqlite3)
+  get_target_property(_shadow_sqlite_include sqlite3 INTERFACE_INCLUDE_DIRECTORIES)
+  message(STATUS "shadow: sqlite3 target present (include dirs: ${_shadow_sqlite_include})")
+else()
+  message(STATUS "shadow: aurora produced no sqlite3 target - fetching the SQLite amalgamation")
+  include(FetchContent)
+  FetchContent_Declare(shadow_sqlite3
+    URL https://sqlite.org/2026/sqlite-amalgamation-3510300.zip
+    URL_HASH SHA256=acb1e6f5d832484bf6d32b681e858c38add8b2acdfd42ac5df24b8afb46552b4
+    DOWNLOAD_EXTRACT_TIMESTAMP FALSE
+  )
+  FetchContent_MakeAvailable(shadow_sqlite3)
+  add_library(sqlite3 STATIC ${shadow_sqlite3_SOURCE_DIR}/sqlite3.c)
+  target_include_directories(sqlite3 PUBLIC ${shadow_sqlite3_SOURCE_DIR})
+  message(STATUS "shadow: sqlite3 fetched into ${shadow_sqlite3_SOURCE_DIR}")
+endif()
+
 # generated/ is produced by tools/gen.py from the player's own disc image and is never committed. Without it there is
 # nothing to simulate, so say that plainly instead of failing on a missing include or an unknown function.
 if(NOT EXISTS ${CMAKE_CURRENT_LIST_DIR}/generated/files.cmake)
