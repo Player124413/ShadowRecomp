@@ -134,11 +134,15 @@ jobs:
           # Every translation unit the build knows about, as a build target, so we can compile them all and skip the
           # link: linking needs the recompiled game functions, which only the disc can produce.
           python3 - <<'PY' > objects.txt
-          import json
+          import json, os
+          build = 'build-android'
           seen = set()
-          for entry in json.load(open('build-android/compile_commands.json')):
+          for entry in json.load(open(os.path.join(build, 'compile_commands.json'))):
               out = entry.get('output')
-              if out and out not in seen:
+              if not out:
+                  continue
+              out = os.path.relpath(out, os.path.abspath(build))   # ninja knows the objects by their in-build path
+              if out not in seen:
                   seen.add(out)
                   print(out)
           PY
