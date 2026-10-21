@@ -8,18 +8,17 @@ name: Android APK
 #   checks        - the disc-free tests that live in tools/android/ (touch layout, ETC2 encoder, the Java sources).
 #                   Needs nothing but g++/python, so it always runs and always means something.
 #   compile       - compiles the whole native port (runtime + Aurora + the Android glue) for arm64 with the real NDK,
-#                   WITHOUT the game code: tools/android/stub_generated.py stands in for generated/, and every object
-#                   file is built while the link is left out. This is the check that catches "it stopped building".
-#   apk           - the actual installable APK. The recompiled game code only exists on the machine of someone who owns
-#                   the disc, so this job asks for a link to it: "Run workflow" has a box called `game_code_url`, and a
-#                   Hugging Face link (or any direct link) to an .iso/.gcm image, a .tar.gz / .zip of generated/ or of a
-#                   disc folder or main.dol, or main.dol itself is enough - the DOL is extracted from an image, and
-#                   tools/gen.py is run here unless the upload already contains generated/. A repository secret
-#                   SHADOW_GEN_URL still works as the default for pushes, if you would rather not paste it each time.
-#                   Without either, it builds a *launcher-only* APK: the same Gradle/NDK/SDL3/CMake packaging path, with
-#                   empty stand-ins in place of the game code (tools/android/stub_generated.py --definitions). That one
-#                   installs and shows the launcher but cannot play; it exists so the packaging itself is built and
-#                   tested on every push rather than on the one machine that owns a disc.
+#                   every translation unit, without linking (a link needs the game's functions, which are the APK job's
+#                   business). When you give it game code (below), that is what it compiles, so a portability problem in
+#                   the recompiled code shows up here; without it, stand-ins are used so the job still tests the port.
+#   apk           - the installable APK, linked, packaged and uploaded. It needs the game code, and this job asks for a
+#                   link to it: "Run workflow" has a box called `game_code_url`, and a Hugging Face (or any direct) link
+#                   to an .iso/.gcm image, to a .tar.gz/.zip of generated/ or of a disc folder or main.dol, or to
+#                   main.dol itself is enough - the DOL is taken out of an image and tools/gen.py runs here. A
+#                   repository secret SHADOW_GEN_URL is used as the default when you would rather not paste it each time.
+#                   Without either, the APK is launcher-only: the same Gradle/NDK/SDL3/CMake packaging with stand-ins in
+#                   place of the game's functions, so the packaging itself is built and tested on every push. That one
+#                   installs and shows the launcher but cannot play.
 #
 # Nothing here touches the game's data: the disc image, the DOL and generated/ are never committed, and the APK artifact
 # contains the recompiled code, not the disc.
@@ -131,7 +130,9 @@ jobs:
           python3 -c "import yaml,sys; yaml.safe_load(open('.github/workflows/android-apk.yml')); print('yaml ok')"
 
   compile:
-    name: Compile the native port (arm64, no game code)
+    # Named for what it does, not for what it lacks: it compiles the native port for arm64, and compiles the game's own
+    # code too whenever a link is given (see the step below).
+    name: Compile the native port (arm64)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -157,8 +158,23 @@ jobs:
           [ "$ok" = "1" ] || { echo "::error ::the Android SDK packages could not be installed"; exit 1; }
           echo "ANDROID_HOME=$ANDROID_HOME"
 
-      - name: Stand-in generated/ (the disc's code is not in the repository)
-        run: python3 tools/android/stub_generated.py
+      - name: Game code (the link you gave, or a stand-in)
+        env:
+          INPUT_URL: ${{ inputs.game_code_url }}
+          SECRET_URL: ${{ secrets.SHADOW_GEN_URL }}
+        run: |
+          url="${INPUT_URL:-$SECRET_URL}"
+          if [ -n "$url" ]; then
+            # The real thing: what this job compiles is then exactly what the APK will contain.
+            chmod +x tools/android/fetch_game_code.sh
+            tools/android/fetch_game_code.sh "$url"
+            echo "compiling the game's own recompiled code"
+          else
+            # No link: declarations only (no bodies), which is all a compile needs. Nothing here can play a disc; the
+            # point is that the port itself still builds, on every push, without anyone's game files.
+            python3 tools/android/stub_generated.py
+            echo "compiling the port against stand-in declarations (no game code was given)"
+          fi
 
       - name: Configure for arm64
         run: |
@@ -206,7 +222,7 @@ jobs:
           PY
           wc -l < objects.txt | xargs echo "translation units:"
 
-      - name: Compile everything (the link is deliberately not attempted)
+      - name: Compile every translation unit (the APK job does the linking)
         run: |
           set +e
           xargs -a objects.txt ninja -C build-android -k 0 > build.log 2>&1
@@ -241,8 +257,14 @@ jobs:
 
       - name: Say what was proven
         run: |
-          echo "All native sources compiled for arm64-v8a with NDK $NDK_VERSION."
-          echo "Not linked and not packaged: that needs generated/ from python tools/gen.py (your own disc)."
+          # generated/funcs.h says who wrote it: the stand-in script, or tools/gen.py from a real disc.
+          if grep -q "stub_generated.py" generated/funcs.h 2>/dev/null; then
+            echo "All native sources compiled for arm64-v8a with NDK $NDK_VERSION, against stand-ins for the game's functions."
+            echo "Give the run a game_code_url to compile the real code as well; the APK job links it."
+          else
+            echo "All native sources - including the game's own recompiled code - compiled for arm64-v8a with NDK $NDK_VERSION."
+          fi
+          echo "Not linked here: that is the APK job, which needs the same game code."
 
   apk:
     name: Build the APK
@@ -277,88 +299,10 @@ jobs:
         env:
           URL: ${{ steps.gamecode.outputs.url }}
         run: |
-          set -euo pipefail
-          # -L follows the redirect Hugging Face answers with (huggingface.co -> cdn-lfs.huggingface.co), --retry
-          # survives an occasional reset. What lands can be, in the order the checks below try them:
-          #   * an archive (.tar.gz / .tgz / .tar.xz / .zip) holding generated/, a disc folder, main.dol, or an ISO;
-          #   * a disc image (.iso / .gcm) - only the DOL inside it is needed, and tools/game_import extracts just that;
-          #   * main.dol itself, hosted as a single file.
-          curl -fsSL --retry 3 --retry-delay 2 -o /tmp/gamecode.bin "$URL"
-          echo "downloaded $(stat -c%s /tmp/gamecode.bin) bytes"
-
-          # A Hugging Face *file page* (huggingface.co/user/repo/blob/main/...) answers with HTML, not with the file.
-          # Say that plainly instead of downloading 12 kB of web page and calling it a disc.
-          if head -c 512 /tmp/gamecode.bin | grep -qiE '<!doctype html|<html'; then
-            echo "::error ::that link is a web page, not a file. On Hugging Face use the direct link: the \"Download\" /"
-            echo "::error ::raw button, or .../resolve/main/<file name> in place of .../blob/main/<file name>"
-            exit 1
-          fi
-
-          rm -rf /tmp/gamecode && mkdir -p /tmp/gamecode
-          if tar -tzf /tmp/gamecode.bin >/dev/null 2>&1; then
-            echo "archive: tar.gz"; tar -xzf /tmp/gamecode.bin -C /tmp/gamecode
-          elif tar -tJf /tmp/gamecode.bin >/dev/null 2>&1; then
-            echo "archive: tar.xz"; tar -xJf /tmp/gamecode.bin -C /tmp/gamecode
-          elif unzip -tq /tmp/gamecode.bin >/dev/null 2>&1; then
-            echo "archive: zip"; unzip -q /tmp/gamecode.bin -d /tmp/gamecode
-          else
-            # Not an archive: what is it? Dolphin's compressed formats first, so the answer is a real one and not
-            # "this main.dol is not the USA release".
-            kind=$(python3 -c "
-          import sys
-          head = open('/tmp/gamecode.bin', 'rb').read(0x440)
-          if head[:4] in (b'RVZ\x01', b'WIA\x01') or head[:4] == b'\x01\xc0\x0b\xb1':
-              print('compressed')
-          elif len(head) >= 0x440 and head[0x1C:0x20] == b'\xc2\x33\x9f\x3d':
-              print('iso')
-          else:
-              print('file')
-          ")
-            case "$kind" in
-              compressed)
-                echo "::error ::that is a Dolphin-compressed image (RVZ/WIA/GCZ). Convert it once - in Dolphin,"
-                echo "::error ::right-click the game > Convert File... > Format: ISO - and link the ISO instead."
-                exit 1
-                ;;
-              iso)
-                echo "disc image: an ISO/GCM, so only the DOL inside it will be taken"
-                cp /tmp/gamecode.bin /tmp/gamecode/game.iso
-                ;;
-              *)
-                echo "single file: treating it as main.dol"
-                mkdir -p /tmp/gamecode/sys && cp /tmp/gamecode.bin /tmp/gamecode/sys/main.dol
-                ;;
-            esac
-          fi
-
-          gen_cmake=$(find /tmp/gamecode -maxdepth 6 -path '*/generated/files.cmake' | head -1 || true)
-          dol=$(find /tmp/gamecode -maxdepth 6 -name main.dol | head -1 || true)
-          iso=$(find /tmp/gamecode -maxdepth 3 \( -iname '*.iso' -o -iname '*.gcm' \) | head -1 || true)
-          # An ISO is the friendliest thing to upload (it is what the phone wants too); this build needs one file out
-          # of it, so it is extracted - 1.4 GB does not have to be unpacked to get 5 MB.
-          if [ -z "$dol" ] && [ -n "$iso" ]; then
-            echo "extracting sys/main.dol from $iso"
-            python3 tools/game_import/gameimport.py extract "$iso" /tmp/disc-extract
-            dol=/tmp/disc-extract/sys/main.dol
-          fi
-
-          if [ -n "$gen_cmake" ]; then
-            echo "found recompiled game code in $(dirname "$(dirname "$gen_cmake")")"
-            mkdir -p generated && cp -a "$(dirname "$gen_cmake")/." generated/
-          elif [ -n "$dol" ]; then
-            echo "found $dol - recompiling it with tools/gen.py"
-            mkdir -p /tmp/disc/sys && cp "$dol" /tmp/disc/sys/main.dol
-            python3 -c "import hashlib,sys; h=hashlib.sha1(open('/tmp/disc/sys/main.dol','rb').read()).hexdigest(); \
-              print('main.dol sha1:', h); sys.exit(0 if h=='118ef49ebd45b371b6f514e0e1b6d1ba7cf12904' else 1)" \
-              || { echo "::error ::that main.dol is not the USA release (GUPE8P rev 0) - the game would not run"; exit 1; }
-            SHADOW_DISC=/tmp/disc python3 tools/gen.py
-          else
-            echo "::error ::the link has neither generated/files.cmake nor a disc image / main.dol in it"
-            find /tmp/gamecode -maxdepth 3 | head -50
-            exit 1
-          fi
-          test -f generated/files.cmake || { echo "::error ::no generated/files.cmake was produced"; exit 1; }
-          echo "game code source files: $(grep -c '\.cpp' generated/files.cmake)"
+          # One script for both jobs (and usable by hand): downloads, unpacks an archive or an ISO, recompiles with
+          # tools/gen.py when it was not given generated/ already, and leaves generated/ in the working directory.
+          chmod +x tools/android/fetch_game_code.sh
+          tools/android/fetch_game_code.sh "$URL"
 
       - name: Stand-in generated/ (launcher-only APK)
         if: steps.gamecode.outputs.have == 'no'
