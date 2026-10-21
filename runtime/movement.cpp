@@ -16,7 +16,7 @@
 #include "osk.h"
 #include "sys.h"
 #include <imgui.h>
-#include <windows.h>
+#include "plat.h"
 #include <algorithm>
 #include <cmath>
 #include <cstdlib>
@@ -190,7 +190,7 @@ std::string presets_path() {
   char exe[MAX_PATH];
   GetModuleFileNameA(nullptr, exe, MAX_PATH);
   std::string p = exe;
-  return p.substr(0, p.find_last_of("\\/")) + "\\movement_presets.ini";
+  return p.substr(0, p.find_last_of("\\/")) + RT_S "movement_presets.ini";
 }
 void save_presets() {
   FILE* f = fopen(presets_path().c_str(), "w");

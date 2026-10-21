@@ -9,7 +9,7 @@ namespace set_capacity { uint32_t cap_of(uint32_t manager); }   // set_capacity.
 #include "input.h"
 #include "lighting_environment.h"
 #define NOMINMAX
-#include <windows.h>
+#include "plat.h"
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -72,7 +72,7 @@ void load_v3(int stage) {
   g_owner=0;g_time=0;g_spawn_pending=false;g_buttons=0;g_stage=stage;
   g_last_stage_time=-1;
   char exe[MAX_PATH];GetModuleFileNameA(nullptr,exe,MAX_PATH);std::string path=exe;
-  path=path.substr(0,path.find_last_of("\\/"))+"\\mods\\stages\\stg";
+  path=path.substr(0,path.find_last_of("\\/"))+RT_S "mods" RT_S "stages" RT_S "stg";
   char name[32];snprintf(name,sizeof name,"%04d.bin",stage);path+=name;
   std::ifstream f(path,std::ios::binary|std::ios::ate);if(!f)return;
   const auto size=f.tellg();if(size<sizeof(Header)||size>2*1024*1024)return;
@@ -265,8 +265,8 @@ void vm_load(int stage) {
   g_ops.clear();g_glides.clear();g_pos_off.clear();g_roots.clear();g_find.clear();
   g_vm=Vm{};for(auto& h:g_hud_vals)h=HudVal{};
   char exe[MAX_PATH];GetModuleFileNameA(nullptr,exe,MAX_PATH);std::string path=exe;
-  g_vm_dir=path.substr(0,path.find_last_of("\\/"))+"\\mods";
-  char name[40];snprintf(name,sizeof name,"\\mods\\stages\\stg%04d.v4.bin",stage);
+  g_vm_dir=path.substr(0,path.find_last_of("\\/"))+RT_S "mods";
+  char name[40];snprintf(name,sizeof name,RT_S "mods" RT_S "stages" RT_S "stg%04d.v4.bin",stage);
   path=path.substr(0,path.find_last_of("\\/"))+name;
   std::ifstream f(path,std::ios::binary|std::ios::ate);if(!f)return;
   const size_t size=size_t(f.tellg());if(size<64||size>4*1024*1024){logf("[workshop] vm: %s bad size\n",path.c_str());return;}
@@ -313,7 +313,7 @@ void vm_load(int stage) {
   for(size_t i=0;i<ne;++i)if(g_vm.entries[i].event==9)g_vm.last[i]=0;   // every N s: N, 2N, ... of stage time
   g_vm.ok=true;
   if(g_live){fclose(g_live);g_live=nullptr;}
-  {const std::string lp=path.substr(0,path.find("\\mods\\"))+"\\live-highlight.jsonl";g_live=fopen(lp.c_str(),"wb");
+  {const std::string lp=path.substr(0,path.find(RT_S "mods" RT_S ""))+RT_S "live-highlight.jsonl";g_live=fopen(lp.c_str(),"wb");
    g_live_bytes=0;g_live_nodes.clear();g_live_vars_t=-1;g_live_vals.clear();
    char b[160];snprintf(b,sizeof b,"{\"ev\":\"start\",\"stage\":%d,\"instructions\":%u,\"nodes\":%zu}\n",stage,ncode,g_vm.nodes.size());live_write(b);}
   logf("[workshop] vm stg%04d.v4.bin: %u entries, %u instructions, %u objects, %u variables (v3 triggers %u)\n",stage,ne,ncode,no,nv,g_vm.v3_triggers);
@@ -421,9 +421,9 @@ std::pair<uint32_t,bool> vm_run(VmCo& c,uint32_t budget) {
         logf("[workshop] vm HUD value line %d: %s = variable %d\n",k+1,g_hud_vals[k].label.c_str(),int(var));break;}
       case 24:{const int k=std::clamp(int(pop())-1,0,2);g_hud_vals[k].on=false;logf("[workshop] vm HUD value line %d hidden\n",k+1);break;}
       case 25:{const float s=pop();const std::string a=uint32_t(s)<g_vm.strings.size()?g_vm.strings[uint32_t(s)]:std::string();   // play sound: mods\sounds\<asset>[.wav]
-        const std::string dir=g_vm_dir+"\\sounds\\";std::string f=dir+a;
+        const std::string dir=g_vm_dir+RT_S "sounds" RT_S "";std::string f=dir+a;
         if(GetFileAttributesA(f.c_str())==INVALID_FILE_ATTRIBUTES)f+=".wav";
-        if(a.empty()||!audio_play_file(f.c_str()))logf("[workshop] vm play sound \"%s\": no such sound in mods\\sounds (game cues are not supported yet)\n",a.c_str());
+        if(a.empty()||!audio_play_file(f.c_str()))logf("[workshop] vm play sound \"%s\": no such sound in mods" RT_S "sounds (game cues are not supported yet)\n",a.c_str());
         break;}
       default:{   // 13 message: no on-screen text yet - logged only
         const float sec=pop(),s=pop();

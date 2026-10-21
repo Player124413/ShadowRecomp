@@ -1,9 +1,17 @@
 // Fiber based implementation of the Dolphin OS context switch primitives.
-#include "sched.h"
+#include "rt_sched.h"
 #include "funcs.h"
-#include <windows.h>
+#include "plat.h"
 #include <unordered_map>
 #include <vector>
+#ifdef _WIN32
+#include <windows.h>
+#else
+// Android and Linux: cooperative fibers on ucontext. The guest's threads (OSCreateThread / OSSaveContext) switch
+// exactly the same way as on the PC; only the switch primitive differs.
+#include <ucontext.h>
+#include <sys/mman.h>
+#endif
 
 ExcFrame* g_exc_top = nullptr;
 bool g_trace_sched = false;
@@ -13,7 +21,13 @@ enum Mode { M_NONE = 0, M_RETURN, M_UNWIND, M_START };
 
 struct Fiber {
   int id = 0;
-  void* handle = nullptr;
+#ifdef _WIN32
+  void* handle = nullptr;          // Windows fiber
+#else
+  ucontext_t ctx{};                // POSIX: the saved machine context
+  void* stack = nullptr;           // its own stack (the main fiber has none: it is the caller's)
+  size_t stack_size = 0;
+#endif
   Cpu* cpu = nullptr;
   ExcFrame* exc_top = nullptr;
   int mode = M_NONE;
@@ -27,8 +41,14 @@ std::unordered_map<uint32_t, Fiber*> g_owner;      // OSContext (physical) -> ow
 
 constexpr uint32_t kMask = RT_RAM_MASK;
 
+#ifdef _WIN32
 void CALLBACK fiber_main(void* p) {
   Fiber* f = (Fiber*)p;
+#else
+Fiber* g_starting = nullptr;       // the fiber a freshly made context starts (makecontext takes ints only)
+void fiber_entry() {
+  Fiber* f = g_starting;
+#endif
   logf("[sched] fiber %d starts at %08X lr=%08X r1=%08X\n", f->id, f->start_pc, f->start_lr, f->cpu->r[1]);
   Cpu& c = *f->cpu;
   g_exc_top = nullptr;
@@ -43,6 +63,36 @@ void CALLBACK fiber_main(void* p) {
 }
 
 void reap_dead();
+
+// ---- the switch primitive -----------------------------------------------------------------------------------------
+#ifdef _WIN32
+void* fiber_create(Fiber* f) { return CreateFiberEx(1 << 16, 16 << 20, 0, fiber_main, f); }
+void fiber_destroy(Fiber* f) { if (f->handle) DeleteFiber(f->handle); }
+void fiber_switch(Fiber* from, Fiber* to) { (void)from; SwitchToFiber(to->handle); }
+void fiber_init_main(Fiber*) {}
+#else
+constexpr size_t kFiberStack = 16u << 20;   // as on the PC: the recompiled guest code uses big frame stacks
+void* fiber_create(Fiber* f) {
+  void* stack = mmap(nullptr, kFiberStack, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+  if (stack == MAP_FAILED) return nullptr;
+  f->stack = stack;
+  f->stack_size = kFiberStack;
+  getcontext(&f->ctx);
+  f->ctx.uc_stack.ss_sp = stack;
+  f->ctx.uc_stack.ss_size = kFiberStack;
+  f->ctx.uc_link = nullptr;
+  g_starting = f;
+  makecontext(&f->ctx, fiber_entry, 0);
+  return f;
+}
+void fiber_destroy(Fiber* f) {
+  if (f->stack) munmap(f->stack, f->stack_size);
+  f->stack = nullptr;
+}
+void fiber_switch(Fiber* from, Fiber* to) { swapcontext(&from->ctx, &to->ctx); }
+void fiber_init_main(Fiber*) {}
+#endif
+
 void switch_to(Fiber* t, int mode) {
   Fiber* me = g_cur;
   if (g_trace_sched) logf("[sched] switch %d -> %d mode %d\n", me->id, t->id, mode);
@@ -50,7 +100,7 @@ void switch_to(Fiber* t, int mode) {
   t->mode = mode;
   g_cur = t;
   g_exc_top = t->exc_top;
-  SwitchToFiber(t->handle);
+  fiber_switch(me, t);
   // resumed
   g_cur = me;
   g_exc_top = me->exc_top;
@@ -64,7 +114,7 @@ void reap_dead() {
     Fiber* f = g_fibers[i];
     if (!f || !f->dead || f == g_cur || f->exc_top) continue;   // never free a fiber with a pending exception frame
     for (auto it = g_owner.begin(); it != g_owner.end();) it = it->second == f ? g_owner.erase(it) : std::next(it);
-    DeleteFiber(f->handle);
+    fiber_destroy(f);
     free(f->cpu);
     delete f;
     g_fibers[i] = nullptr;
@@ -75,7 +125,7 @@ void reap_dead() {
 void sched_init(Cpu& main_cpu) {
   Fiber* f = new Fiber();
   f->id = 0;
-  f->handle = ConvertThreadToFiber(nullptr);
+  fiber_init_main(f);
   f->cpu = &main_cpu;
   g_fibers.push_back(f);
   g_cur = f;
@@ -162,7 +212,7 @@ void hle_OSLoadContext(Cpu& c) {
     f->cpu->budget = 4000;
     f->start_pc = ld32(ctx + 0x198);
     f->start_lr = ld32(ctx + 0x84);
-    f->handle = CreateFiberEx(1 << 16, 16 << 20, 0, fiber_main, f);
+    fiber_create(f);
     g_fibers.push_back(f);
     g_owner[key] = f;
     target = f;

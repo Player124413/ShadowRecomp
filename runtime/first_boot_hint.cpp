@@ -7,7 +7,7 @@
 #include <cstdlib>
 #include <string>
 #define WIN32_LEAN_AND_MEAN
-#include <windows.h>
+#include "plat.h"
 
 void hud_text_show(const char* text, double seconds);   // settings_ui.cpp
 
@@ -17,7 +17,7 @@ std::string marker() {
   char exe[MAX_PATH];
   GetModuleFileNameA(nullptr, exe, MAX_PATH);
   std::string d = exe;
-  return d.substr(0, d.find_last_of("\\/")) + "\\shadow_menu_seen";
+  return d.substr(0, d.find_last_of("\\/")) + RT_S "shadow_menu_seen";
 }
 int g_seen = -1;   // -1 not checked yet
 bool g_shown = false;

@@ -1,12 +1,17 @@
 // Safe points, exceptions, SPRs and misc system glue.
 #include "sys.h"
 #include "hw.h"
-#include "sched.h"
+#include "rt_sched.h"
 #include "gx_lle.h"
 #include <cstdarg>
 #include <cstdlib>
 #include <unordered_map>
-#include <windows.h>
+#include "plat.h"
+#ifndef _WIN32
+#include <csignal>
+#include <thread>
+#include <unistd.h>
+#endif
 
 
 // Debug call tracing: TRACE_FN=8016A108,800454F8 logs each call (r3-r6, backtrace) of up to 4 guest functions.
@@ -57,8 +62,12 @@ void logf(const char* fmt, ...) {
 
 void sys_fatal() {
   fflush(stderr);
+#ifdef _WIN32
   TerminateProcess(GetCurrentProcess(), 3);   // #153: no teardown (it can block on the GPU driver)
   ExitProcess(3);
+#else
+  _exit(3);
+#endif
 }
 
 void sys_backtrace(Cpu& c) {
@@ -272,6 +281,7 @@ void rt_poll(Cpu& c, uint32_t pc) {
   }
 }
 
+#ifdef _WIN32
 static LONG WINAPI crash_filter(EXCEPTION_POINTERS* ep) {
   fprintf(stderr, "\n[crash] host exception %08lX at %p\n", ep->ExceptionRecord->ExceptionCode, ep->ExceptionRecord->ExceptionAddress);
   {   // which module / thread (host faults inside Dawn or the runtime look alike in the guest backtrace)
@@ -287,6 +297,19 @@ static LONG WINAPI crash_filter(EXCEPTION_POINTERS* ep) {
   fflush(stderr);
   return EXCEPTION_CONTINUE_SEARCH;
 }
+#else
+// Android / POSIX: a fatal signal (SIGSEGV, SIGBUS, SIGILL, SIGFPE, SIGABRT) logs the guest backtrace it was in and
+// lets the default handler kill the process, so the crash report reads like the Windows one.
+static void signal_filter(int sig) {
+  fprintf(stderr, "\n[crash] host signal %d (%s)\n", sig,
+          sig == SIGSEGV ? "SIGSEGV" : sig == SIGBUS ? "SIGBUS" : sig == SIGILL ? "SIGILL"
+                        : sig == SIGFPE ? "SIGFPE" : sig == SIGABRT ? "SIGABRT" : "signal");
+  if (Cpu* c = sched_current_cpu()) sys_backtrace(*c);
+  fflush(stderr);
+  signal(sig, SIG_DFL);
+  raise(sig);
+}
+#endif
 // #153 (user: "very hard to close the game, it freezes"): closing never runs the process teardown. exit() / ExitProcess
 // first kill every other thread (the #114 watchdog with them), then run the static destructors and DLL detach: the Dawn
 // device drains the GPU and SDL closes the audio device there, which a busy or hung driver can block for minutes. Here:
@@ -295,7 +318,8 @@ static LONG WINAPI crash_filter(EXCEPTION_POINTERS* ep) {
 // and settings are saved when they change. Windows releases the GPU device with the process.
 void audio_stop_for_exit();   // audio.cpp
 [[noreturn]] void sys_exit_guarded(int code) {
-  const uint64_t t0 = GetTickCount64();
+  const uint64_t t0 = plat::now_ms();
+#ifdef _WIN32
   // the window goes away at once (the kernel may need a moment to release a GPU device that is still busy)
   EnumWindows([](HWND w, LPARAM) -> BOOL {
     DWORD pid = 0;
@@ -307,10 +331,19 @@ void audio_stop_for_exit();   // audio.cpp
     WaitForSingleObject(h, 150);
     CloseHandle(h);
   }
-  fprintf(stderr, "[exit] fast exit (code %d, %llu ms): process terminated, no teardown\n", code, (unsigned long long)(GetTickCount64() - t0));
+  fprintf(stderr, "[exit] fast exit (code %d, %llu ms): process terminated, no teardown\n", code, (unsigned long long)(plat::now_ms() - t0));
   fflush(stderr);
   TerminateProcess(GetCurrentProcess(), (UINT)code);
   ExitProcess((UINT)code);   // not reached
+#else
+  // Android: the same reasoning (never run the teardown: the Vulkan device and the audio device can block the main
+  // thread for seconds). The audio device is stopped for at most 150 ms, then the process leaves at once.
+  std::thread(audio_stop_for_exit).detach();   // stop the sound output, but never wait more than a moment for it
+  plat::sleep_ms(150);
+  fprintf(stderr, "[exit] fast exit (code %d): process terminated, no teardown\n", code);
+  fflush(stderr);
+  _exit(code);
+#endif
 }
 static void at_exit_report() {
   fprintf(stderr, "[exit] process exiting\n");
@@ -318,7 +351,11 @@ static void at_exit_report() {
   fflush(stderr);
 }
 void sys_install_crash_handlers() {
+#ifdef _WIN32
   SetUnhandledExceptionFilter(crash_filter);
+#else
+  for (int sig : {SIGSEGV, SIGBUS, SIGILL, SIGFPE, SIGABRT}) signal(sig, signal_filter);
+#endif
   atexit(at_exit_report);
 }
 

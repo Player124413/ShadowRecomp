@@ -4,7 +4,7 @@
 #include "sys.h"
 #include "stage_workshop.h"
 #define NOMINMAX
-#include <windows.h>
+#include "plat.h"
 #include <png.h>
 #include <filesystem>
 #include <algorithm>
@@ -58,10 +58,10 @@ std::string exe_dir() {
   const std::string p = exe;
   return p.substr(0, p.find_last_of("\\/"));
 }
-std::string profile_path() { return exe_dir() + "\\lighting_profiles.ini"; }
+std::string profile_path() { return exe_dir() + RT_S "lighting_profiles.ini"; }
 // L1 / L4: a Stage Workshop build's rules for one stage (same format), used after lighting_profiles.ini
 std::string stage_rules_path(int stage) {
-  char b[64]; snprintf(b, sizeof b, "\\mods\\stages\\stg%04d.light.ini", stage);
+  char b[64]; snprintf(b, sizeof b, RT_S "mods" RT_S "stages" RT_S "stg%04d.light.ini", stage);
   return exe_dir() + b;
 }
 bool numbers(std::string s, float* out, int n) {

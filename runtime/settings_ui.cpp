@@ -5,6 +5,7 @@
 #include "bug_capture.h"
 #include "controls.h"
 #include "movement.h"
+#include "touch.h"
 void custom_stats_tick();   // custom_stats.cpp
 #include "gx_lle.h"
 #include "cheats.h"
@@ -20,7 +21,7 @@ void boss_hud_draw();   // boss_ai.cpp (#126): boss name over the shared HP bar 
 #include <algorithm>
 #include <vector>
 #define NOMINMAX
-#include <windows.h>
+#include "plat.h"
 #include <cstdio>
 #include <cctype>
 #include <cstring>
@@ -42,7 +43,7 @@ static std::string ini_path() {
   char exe[MAX_PATH];
   GetModuleFileNameA(nullptr, exe, MAX_PATH);
   std::string p = exe;
-  return p.substr(0, p.find_last_of("\\/")) + "\\shadow_settings.ini";
+  return p.substr(0, p.find_last_of("\\/")) + RT_S "shadow_settings.ini";
 }
 
 // the lighting engine's settings, saved by name
@@ -90,7 +91,7 @@ static uint64_t s_ini_seen = 0;
 // cheatN=0/1 and unlock_all_stages=0/1 and resets them to 0 whenever it starts, so they never stay on by accident.
 static std::string cheats_path() {
   std::string p = ini_path();
-  return p.substr(0, p.find_last_of("\\/")) + "\\shadow_cheats.ini";
+  return p.substr(0, p.find_last_of("\\/")) + RT_S "shadow_cheats.ini";
 }
 static void poll_cheats() {
   static uint64_t seen = ~0ull;
@@ -125,7 +126,7 @@ static const struct { const char* key; uint32_t addr; } kLiveWords[] = {
 };
 static std::string side_path(const char* name) {
   std::string p = ini_path();
-  return p.substr(0, p.find_last_of("\\/")) + "\\" + name;
+  return p.substr(0, p.find_last_of("\\/")) + RT_S "" + name;
 }
 static void poll_live_commands() {
   static std::map<std::string, int> applied;
@@ -573,6 +574,7 @@ void draw() {
       ImGui::End();
     }
   }
+  touch::draw();         // on-screen controls (touch.cpp); the settings menu draws over them
   bug_capture::tick();   // #135
   game_menu::draw();   // #132 last: over every other overlay
 }

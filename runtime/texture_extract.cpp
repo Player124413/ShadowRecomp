@@ -25,8 +25,10 @@
 #include <vector>
 #define WIN32_LEAN_AND_MEAN
 #define NOMINMAX
-#include <windows.h>
+#include "plat.h"
+#ifdef _WIN32
 #include <shellapi.h>
+#endif
 
 namespace fs = std::filesystem;
 namespace texture_extract {
@@ -36,10 +38,8 @@ std::atomic<int> g_found{0}, g_written{0};
 std::mutex g_msg_mutex;
 std::string g_msg;
 
-fs::path exe_dir() {
-  wchar_t exe[MAX_PATH];
-  GetModuleFileNameW(nullptr, exe, MAX_PATH);
-  return fs::path(exe).parent_path();
+fs::path exe_dir() {   // next to the program on the PC, the app's folder on Android (plat.h)
+  return fs::path(plat::base_dir());
 }
 uint32_t le32(const uint8_t* p) { return p[0] | (p[1] << 8) | (p[2] << 16) | (uint32_t(p[3]) << 24); }
 uint32_t be32(const uint8_t* p) { return (uint32_t(p[0]) << 24) | (p[1] << 16) | (p[2] << 8) | p[3]; }
@@ -269,7 +269,7 @@ std::string stage_folder(const std::string& sid) {
   return "Stages/Other (menus, tests, extra)/stg" + sid;
 }
 std::pair<std::string, std::string> lang_split(const std::string& base) {
-  static const std::regex re("(.*?)_?(EN|FR|GE|IT|JP|SP)(\\d\\d)?$");
+  static const std::regex re("(.*?)_?(EN|FR|GE|IT|JP|SP)(" RT_S "d" RT_S "d)?$");
   std::smatch m;
   if (std::regex_match(base, m, re) && m[1].length()) return {m[1], kLangs.at(m[2])};
   return {base, ""};
@@ -436,7 +436,7 @@ void run_extract(fs::path src, fs::path out) {
   }
   logf("[textures] extract: %d textures found, %d PNG written, %d could not be decoded -> %s\n", int(recs.size()), int(g_written), bad,
        out.string().c_str());
-  set_msg("Done: " + std::to_string(int(g_written)) + " textures in textures\\Original");
+  set_msg("Done: " + std::to_string(int(g_written)) + " textures in textures" RT_S "Original");
   g_state = 3;
 }
 }  // namespace
@@ -485,7 +485,14 @@ std::string status() {
 }
 void open_folder() {
   ensure_folders();
+#ifdef _WIN32
   const std::wstring p = (exe_dir() / L"textures").wstring();
   ShellExecuteW(nullptr, L"open", p.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
+#else
+  // Android has no file manager to open here: point at the folder in the log (and the launcher can show it)
+  const std::string p = (exe_dir() / "textures").string();
+  logf("[textures] extracted pictures are in %s\n", p.c_str());
+  plat::android_toast(("Textures: " + p).c_str());
+#endif
 }
 }  // namespace texture_extract

@@ -8,6 +8,7 @@
 #include "game_menu.h"
 #include "bug_capture.h"
 #include "controls.h"
+#include "touch.h"
 #include <SDL3/SDL.h>
 #include <aurora/gfx.h>
 #include <algorithm>
@@ -16,6 +17,7 @@
 #include <cstring>
 #include <cstdlib>
 #include <vector>
+#include "plat.h"
 
 namespace {
 SDL_Gamepad* g_pad = nullptr;
@@ -132,7 +134,7 @@ static uint16_t file_buttons() {
   if (!strcmp(name, "FRAMES")) {   // "FRAMES n,x,y,w,h": that region of the next n frames -> work\frame_NNN.ppm (exact frames)
     int n = 0, x = 0, y = 0, w = 0, h = 0;
     if (sscanf(arg, "%d,%d,%d,%d,%d", &n, &x, &y, &w, &h) == 5) {
-      aurora_capture_frames(n, x, y, w, h, "work\\frame_");
+      aurora_capture_frames(n, x, y, w, h, "work" RT_S "frame_");
       logf("[input-file] capturing %d frames (%d,%d %dx%d)\n", n, x, y, w, h);
     }
     return 0;
@@ -208,6 +210,8 @@ PadState input_poll() {
   PadState s{};
   s.stick_x = s.stick_y = s.c_x = s.c_y = 0;
   ensure_gamepad();
+  touch::tick();                     // drain the fingers before anything reads the pad
+  const touch::State ts = touch::state();
   uint16_t b = 0;
   int8_t sx = 0, sy = 0, cx = 0, cy = 0;
   uint8_t lt = 0, rt = 0;
@@ -222,6 +226,10 @@ PadState input_poll() {
     b |= cs.buttons;
     sx = cs.sx; sy = cs.sy; cx = cs.cx; cy = cs.cy;
     lt = cs.lt; rt = cs.rt;
+    // the glass is one more device: its buttons add to the pad, its sticks win only when a thumb is on them
+    b |= ts.buttons;
+    if (ts.sx || ts.sy) { sx = ts.sx; sy = ts.sy; }
+    if (ts.cx || ts.cy) { cx = ts.cx; cy = ts.cy; }
   }
 
   // F3: texture viewer (textures drawn now, their file names, paint one in the game)
@@ -308,6 +316,16 @@ PadState input_poll() {
     // #169 the "Settings menu" binding opens the menu; once open, Back / Esc also still close it (and cancel lists)
     if (!settings::menu_open()) { mi.back = cs.menu_pad; mi.esc = cs.menu_keys; }
     else { mi.back = mi.back || cs.menu_pad; mi.esc = mi.esc || cs.menu_keys; }
+    // touch: the MENU control opens the menu, and while it is open the whole overlay drives it
+    if (touch::consume_menu()) mi.back = true;
+    if (settings::menu_open()) {
+      mi.up |= (ts.buttons & PAD_UP) != 0; mi.down |= (ts.buttons & PAD_DOWN) != 0;
+      mi.left |= (ts.buttons & PAD_LEFT) != 0; mi.right |= (ts.buttons & PAD_RIGHT) != 0;
+      mi.a |= (ts.buttons & PAD_A) != 0; mi.b |= (ts.buttons & PAD_B) != 0;
+      mi.x |= (ts.buttons & PAD_X) != 0; mi.y |= (ts.buttons & PAD_Y) != 0;
+      mi.lb |= (ts.buttons & PAD_L) != 0; mi.rb |= (ts.buttons & PAD_Z) != 0;
+      mi.start |= (ts.buttons & PAD_START) != 0;
+    }
     game_menu::input(mi);
     {   // #135 bug capture: F12, or pad Back + Start together (#170: off by default)
       static bool was = false;

@@ -8,6 +8,12 @@
 // UI library); the art is the game's emblem and its title-menu Shadow (resources 201 / 202).
 // Performance: the launcher draws at most ~120 frames per second and sleeps between frames; animations run on real
 // time (ImGui's DeltaTime), never per frame. The game itself is not running yet.
+
+// The PC launcher: its own window with every setting, drawn with ImGui (see the notes below).
+// Android has its own launcher (android/app, Java) before the game starts; this file compiles to the two stubs at the
+// end there.
+#ifdef _WIN32
+
 #include "settings_ui.h"
 #include "game_menu.h"
 #include "movement.h"
@@ -21,7 +27,7 @@
 #include <png.h>
 #include <cstring>
 #define NOMINMAX
-#include <windows.h>
+#include "plat.h"
 #include <shellapi.h>
 #include <algorithm>
 #include <atomic>
@@ -946,7 +952,7 @@ void page_textures() {
 
 void page_models() {
   card_begin("Replacement models", "A file in the mods folder replaces the game's file with the same path (for example "
-             "character\\shadow.one). Made with tools\\model_swap.py.");
+             "character" RT_S "shadow.one). Made with tools" RT_S "model_swap.py.");
   auto mods = list_mods();   // a copy: toggling renames files and refreshes the list
   if (mods.empty()) {
     ImGui::PushStyleColor(ImGuiCol_Text, col(kMuted));
@@ -1346,3 +1352,16 @@ void run() {
   logf("[launcher] play\n");
 }
 }  // namespace launcher
+
+#else   // !_WIN32: the Android launcher (android/app) replaces this window
+namespace settings {
+// Never used on a phone (g_launcher_mode is only set by launcher::run), kept for gx_lle.cpp.
+void launcher_window_size(int* w, int* h) {
+  *w = 640;
+  *h = 360;
+}
+}  // namespace settings
+namespace launcher {
+void run() {}
+}  // namespace launcher
+#endif

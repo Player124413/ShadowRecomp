@@ -8,7 +8,11 @@
 // Tests: SHADOW_IMPORT_FROM=<disc or folder> imports without asking (with --quiet: no window at all, unless
 // SHADOW_FIRSTRUN_WINDOW=1 - then the window shows without taking focus).
 #include "first_run.h"
-#include <windows.h>
+#include "plat.h"
+// Windows only: the import window (Win32 + COM file dialog + BCrypt SHA-1). The Android launcher imports the disc in
+// Java and hands the game a path (android/app, DiscImport.java), so this file is not part of an Android build
+// (CMakeLists.txt: runtime/first_run_android.cpp there).
+#ifdef _WIN32
 #include <shobjidl.h>
 #include <bcrypt.h>
 #include <commctrl.h>
@@ -188,7 +192,7 @@ Info identify(fs::path p) {
       i.root = p;
     } else {
       none.kind = "folder";
-      none.message = "This folder isn't an extracted GameCube disc (there is no sys\\boot.bin in it).";
+      none.message = "This folder isn't an extracted GameCube disc (there is no sys" RT_S "boot.bin in it).";
       return none;
     }
     return i;
@@ -716,7 +720,7 @@ std::string ui_main(const fs::path& dest, const fs::path& auto_src, const std::s
 }  // namespace
 
 bool disc_present(const std::string& root) {
-  return GetFileAttributesA((root + "\\sys\\main.dol").c_str()) != INVALID_FILE_ATTRIBUTES;
+  return GetFileAttributesA((root + RT_S "sys" RT_S "main.dol").c_str()) != INVALID_FILE_ATTRIBUTES;
 }
 
 std::string run(bool quiet) {
@@ -724,7 +728,7 @@ std::string run(bool quiet) {
   GetModuleFileNameA(nullptr, exe, MAX_PATH);
   std::string dir = exe;
   dir = dir.substr(0, dir.find_last_of("\\/"));
-  const std::string dest_narrow = dir + "\\Shadow";
+  const std::string dest_narrow = dir + RT_S "Shadow";
   const fs::path dest = exe_dir() / L"Shadow";
   wchar_t from[MAX_PATH] = {};
   const bool have_from = GetEnvironmentVariableW(L"SHADOW_IMPORT_FROM", from, MAX_PATH) > 0;
@@ -743,3 +747,5 @@ std::string run(bool quiet) {
 }
 
 }  // namespace first_run
+
+#endif   // _WIN32

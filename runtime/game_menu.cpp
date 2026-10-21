@@ -29,7 +29,7 @@
 #include <vector>
 #define WIN32_LEAN_AND_MEAN
 #define NOMINMAX
-#include <windows.h>
+#include "plat.h"
 
 namespace ms = menu_schema;
 
@@ -216,6 +216,7 @@ void SDLCALL on_folder_picked(void*, const char* const* list, int) {
 }
 void restart_game() {   // the same exe with the same command line, then this one ends (settings saved first)
   settings::save();
+#ifdef _WIN32
   wchar_t exe[MAX_PATH];
   GetModuleFileNameW(nullptr, exe, MAX_PATH);
   std::wstring cmd = GetCommandLineW();
@@ -228,6 +229,10 @@ void restart_game() {   // the same exe with the same command line, then this on
     logf("[menu] restart: new game started, this one ends\n");
     sys_exit_guarded(0);   // #153: no teardown (it can block on the GPU driver)
   }
+#else
+  // Android: the player goes back to the launcher (which starts the game again) - say so instead of a silent failure.
+  plat::android_toast("Settings saved. Close the game to leave; the launcher starts it again.");
+#endif
   g_toast = "Could not restart - please close and start the game again.";
   g_toast_until = now_s() + 4;
 }
@@ -539,7 +544,7 @@ std::string value_text(const ms::Item& it) {
       if (it.kind == ms::Kind::Resolution) { snprintf(b, sizeof b, "%d x %d", settings::g.*it.ifield, settings::g.*it.ifield2); return b; }
       snprintf(b, sizeof b, "%d", raw_value(it)); return b;
     }
-    case ms::Kind::Path: { const std::string& s = settings::g.*it.sfield; return s.empty() ? "textures\\Custom (default)" : s; }
+    case ms::Kind::Path: { const std::string& s = settings::g.*it.sfield; return s.empty() ? "textures" RT_S "Custom (default)" : s; }
     case ms::Kind::Live: {
       const int v = raw_value(it);
       if (it.scale) snprintf(b, sizeof b, "%d%%", v * 100 / it.scale); else snprintf(b, sizeof b, "%d", v);
@@ -641,8 +646,8 @@ void draw_page(ImDrawList* dl, const Layout& L, int page, float alpha, float xof
     if (r.kind == RowKind::Extract || r.kind == RowKind::OpenTex) {   // #143 textures
       const bool ex = r.kind == RowKind::Extract;
       text(dl, f_text, label_px, ImVec2(X(L.content_l), mid - label_px * .68f), C(T.text, alpha), ex ? "Extract the game's textures" : "Open the textures folder");
-      std::string v = ex ? texture_extract::status() : std::string("textures\\Custom and Original");
-      if (ex && v.empty()) v = "To textures\\Original";
+      std::string v = ex ? texture_extract::status() : std::string("textures" RT_S "Custom and Original");
+      if (ex && v.empty()) v = "To textures" RT_S "Original";
       text(dl, f_text, 19 * u, ImVec2(vr - tsize(f_text, 19 * u, v.c_str()).x, mid - 19 * u * .68f), C(focus ? T.text : T.dim, alpha), v.c_str());
       continue;
     }
@@ -809,7 +814,7 @@ void draw_hints(ImDrawList* dl, const Layout& L, float alpha) {
     const bool op = g_focus >= 0 && g_focus < int(rows.size()) && rows[g_focus].kind == RowKind::OpenTex;
     const char* name = it ? it->label : restart ? "Restart the game" : ex ? "Extract the game's textures" : op ? "Open the textures folder" : "Version";
     std::string help = it ? it->help : restart ? "Closes the game and starts it again with the same settings (saved first)."
-                     : ex ? "Saves every texture of the game as a picture in textures\\Original (a few minutes; the game keeps running). Edit a copy, put it in textures\\Custom."
+                     : ex ? "Saves every texture of the game as a picture in textures" RT_S "Original (a few minutes; the game keeps running). Edit a copy, put it in textures" RT_S "Custom."
                      : op ? "Opens the textures folder next to the game: Original (the game's own pictures) and Custom (your edits)."
                      : std::string("This build: ") + build_info::text() + ". Quote it in bug reports.";
     if (it && it->restart == 2)   // changed since the menu opened: say plainly that it waits for a restart (no pop-up, user)

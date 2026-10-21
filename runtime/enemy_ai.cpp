@@ -14,7 +14,7 @@
 #include <fstream>
 #include <map>
 #include <sstream>
-#include <windows.h>
+#include "plat.h"
 
 namespace {
 std::set<uint32_t> g_stand;
@@ -224,7 +224,7 @@ void load_modes() {
   std::string s;
   if (const char* ej = getenv("ENEMY_AI_JSON")) s = ej;   // tests: the json itself (scenarios can't write mods/)
   else {
-    std::ifstream f(dir + "\\mods\\enemy_ai.json");
+    std::ifstream f(dir + RT_S "mods" RT_S "enemy_ai.json");
     if (!f) return;
     std::stringstream ss;
     ss << f.rdbuf();

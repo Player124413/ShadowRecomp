@@ -1,7 +1,7 @@
 // Memory setup, DOL loading and the post-apploader machine state.
 #include "sys.h"
 #include "hw.h"
-#include <windows.h>
+#include "plat.h"
 #include <cstring>
 #include <vector>
 #include <algorithm>
@@ -28,8 +28,9 @@ bool boot_init(const std::string& root) {
   g_ram = (uint8_t*)VirtualAlloc(nullptr, RT_RAM_SIZE + 0x1000, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
   if (!g_ram) { logf("cannot allocate guest RAM\n"); return false; }
   if (!disc_init(root)) return false;
-  auto dol = slurp(root + "/sys/main.dol");
-  if (dol.size() < 0x100) { logf("cannot read main.dol\n"); return false; }
+  std::vector<uint8_t> dol;
+  if (!disc_sys_file("main.dol", dol)) { logf("cannot read main.dol\n"); return false; }
+  if (dol.size() < 0x100) { logf("main.dol is too small\n"); return false; }
   uint32_t bss = be32(&dol[0xD8]), bsssz = be32(&dol[0xDC]);
   memset(g_ram + (bss & RT_RAM_MASK), 0, bsssz);
   for (int i = 0; i < 18; ++i) {
@@ -39,8 +40,9 @@ bool boot_init(const std::string& root) {
   }
 
   // disc header + boot info
-  auto boot = slurp(root + "/sys/boot.bin");
-  auto bi2 = slurp(root + "/sys/bi2.bin");
+  std::vector<uint8_t> boot, bi2;
+  disc_sys_file("boot.bin", boot);
+  disc_sys_file("bi2.bin", bi2);
   auto fst = disc_fst();   // the disc's file table, patched for mods (runtime/disc.cpp)
   memcpy(g_ram, boot.data(), 0x20);
   wr32(0x80000018, 0);

@@ -27,6 +27,8 @@ extern std::string g_disc_root;
 // virtual disc
 bool disc_init(const std::string& root);
 const std::vector<uint8_t>& disc_fst();
+bool disc_is_image();                                        // the disc is an .iso / .gcm file (disc.cpp)
+bool disc_sys_file(const char* name, std::vector<uint8_t>& out);   // "main.dol", "boot.bin", "bi2.bin", "apploader.img"
 bool disc_read(uint64_t offset, uint8_t* dst, uint32_t len);
 std::string disc_describe(uint64_t offset);
 bool disc_seg_range(uint64_t offset, uint64_t* start, uint64_t* len);

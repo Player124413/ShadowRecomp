@@ -13,7 +13,7 @@
 #include <sstream>
 #include <string>
 #include <vector>
-#include <windows.h>
+#include "plat.h"
 
 void f_801F2770(Cpu&);   // sound manager: load bank r4 for stage r5
 void f_801F29D4(Cpu&);   // sound manager: load one bank file (r4 = path)
@@ -33,7 +33,7 @@ std::vector<Extra> read_list() {
     GetModuleFileNameA(nullptr, exe, MAX_PATH);
     std::string dir = exe;
     dir = dir.substr(0, dir.find_last_of("\\/"));
-    std::ifstream f(dir + "\\mods\\sound_banks.txt");
+    std::ifstream f(dir + RT_S "mods" RT_S "sound_banks.txt");
     if (!f) return out;
     std::stringstream ss;
     ss << f.rdbuf();

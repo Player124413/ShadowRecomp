@@ -16,7 +16,7 @@
 #include <aurora/gfx.hpp>
 #include <aurora/lighting.hpp>
 #define NOMINMAX
-#include <windows.h>
+#include "plat.h"
 #include <zlib.h>
 #include <algorithm>
 #include <array>
@@ -81,7 +81,7 @@ float f32at(const std::vector<uint8_t>& b, size_t o) { float v; memcpy(&v, &b[o]
 bool load(int stage, std::vector<Chunk>& out, std::string& from) {
   char name[32]; snprintf(name, sizeof name, "stg%04d.occ", stage);
   std::vector<uint8_t> f;
-  for (const char* dir : {"\\mods\\lighting\\", "\\lighting\\"}) {
+  for (const char* dir : {RT_S "mods" RT_S "lighting" RT_S "", RT_S "lighting" RT_S ""}) {
     from = exe_dir() + dir + name;
     FILE* fp = fopen(from.c_str(), "rb");
     if (!fp) continue;
@@ -256,7 +256,7 @@ void start_job(int stage, V3 origin) {
       ok = load(stage, g.chunks, g.from);
       for (const auto& c : g.chunks) bytes += c.raw.size();
       if (ok) logf("[occlusion] %s: %zu chunks, %.1f MB inflated, %.0f ms\n", g.from.c_str(), g.chunks.size(), bytes / 1048576.0, (real_ns() - t0) * 1e-6);
-      else { g.chunks.clear(); logf("[occlusion] stage %d: no usable baked occupancy (lighting\\stg%04d.occ) - no sky / AO occlusion\n", stage, stage); }
+      else { g.chunks.clear(); logf("[occlusion] stage %d: no usable baked occupancy (lighting" RT_S "stg%04d.occ) - no sky / AO occlusion\n", stage, stage); }
     }
     static const bool nobake = getenv("OCC_NOBAKE") != nullptr;
     if (ok && !g.chunks.empty() && !nobake) {

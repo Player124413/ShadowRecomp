@@ -1,12 +1,17 @@
+// Sampling profiler (PROFILE / PROFILE_GUEST): a development tool for the PC build. It needs Windows threads, DbgHelp
+// symbols and the PDB, none of which exist on a phone; Android profiles with the platform's own tools instead
+// (docs/android/PERFORMANCE.md: simpleperf / Perfetto). The entry point stays so main.cpp is unchanged.
+#include "plat.h"
+#ifdef _WIN32
 // PROFILE=<seconds-after-start>[,<duration>]: sampling profiler for the game thread.
 // A helper thread suspends the main (game) thread ~1000x per second, records its instruction pointer, and after the
 // window resolves the samples to function names with DbgHelp (needs the PDB; the build links with /DEBUG) and logs
 // the top functions. Used to find where frame time goes (recompiled guest code vs runtime vs Aurora).
 #define NOMINMAX
-#include <windows.h>
+#include "plat.h"
 #include <dbghelp.h>
 #include "sys.h"
-#include "sched.h"
+#include "rt_sched.h"
 #include "rt_internal.h"
 #include <set>
 #include <algorithm>
@@ -119,3 +124,9 @@ void profiler_start_if_requested() {
                   DUPLICATE_SAME_ACCESS);
   std::thread(run, start, dur).detach();
 }
+
+#else
+void profiler_start_if_requested() {
+  if (getenv("PROFILE")) fprintf(stderr, "[profile] PROFILE is a PC-only tool (Android: docs/android/PERFORMANCE.md)\n");
+}
+#endif

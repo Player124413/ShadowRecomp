@@ -20,7 +20,7 @@
 #include <sstream>
 #include <string>
 #include <vector>
-#include <windows.h>
+#include "plat.h"
 
 void f_8016B384(Cpu&);
 void f_8016B2A4(Cpu&);
@@ -42,10 +42,8 @@ struct Run {
   std::string route, result;
 } g_run;
 
-fs::path exe_dir() {
-  wchar_t w[MAX_PATH];
-  GetModuleFileNameW(nullptr, w, MAX_PATH);
-  return fs::path(w).parent_path();
+fs::path exe_dir() {   // next to the program on the PC, the app's folder on Android (plat.h)
+  return fs::path(plat::base_dir());
 }
 std::string field(const std::string& s, const char* key) {   // "key": "value" / "key": number (flat, first match)
   const std::string k = std::string("\"") + key + "\"";

@@ -1,7 +1,7 @@
 // GameCube hardware register emulation (LLE-style MMIO).
 #include "sys.h"
 #include "hw.h"
-#include "sched.h"
+#include "rt_sched.h"
 #include "input.h"
 #include "settings_ui.h"
 #include <cstring>

@@ -19,6 +19,7 @@
 #include <cstring>
 #include <string>
 #include <vector>
+#include "plat.h"
 
 extern uint32_t g_plr_owner;   // frame_rate.cpp: the player object
 void f_80290FC8(Cpu&);   // BossCtrlUnit_DispGauge update (original)
@@ -879,7 +880,6 @@ void hle_BDReady(Cpu& c) { const uint32_t u = c.r[3]; f_80285750(c); bd_after_re
 // = another radius). Move runs with the position shifted by the centre (it reads no player position); GetStatus's two
 // angles are taken again round the centre; the zero vector holds the centre during CHASE / ESCAPE only.
 // BF_NO_RECENTRE=1: off.
-extern "C" __declspec(dllimport) unsigned long __stdcall GetModuleFileNameA(void*, char*, unsigned long);
 void f_80252848(Cpu&);   // HeavyDog0510ModeCtrlUnit_CHASE update
 void f_80252B7C(Cpu&);   // HeavyDog0510ModeCtrlUnit_ESCAPE update
 void f_8026BF54(Cpu&);   // HeavyDog0510CtrlUnit_Move update
@@ -901,7 +901,7 @@ BfArena boss_arena_of(unsigned want) {   // the editor arena of a boss type (B7 
     char exe[512] = {};
     GetModuleFileNameA(nullptr, exe, sizeof exe);
     std::string path = exe;
-    path = path.substr(0, path.find_last_of("\/")) + "\mods\boss_arena.txt";
+    path = path.substr(0, path.find_last_of("\/")) + RT_S "mods" RT_S "boss_arena.txt";
     if (FILE* f = fopen(path.c_str(), "rb")) { char b[4096]; size_t n = fread(b, 1, sizeof b - 1, f); fclose(f); txt.assign(b, n); }
   }
   for (char& ch : txt) if (ch == ';') ch = '\n';

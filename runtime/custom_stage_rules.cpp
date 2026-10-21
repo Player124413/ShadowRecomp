@@ -15,7 +15,7 @@
 #include <fstream>
 #include <sstream>
 #include <string>
-#include <windows.h>
+#include "plat.h"
 
 namespace speed_ram { void frame(Cpu& c); }
 void f_802EEAF0(Cpu&);
@@ -32,10 +32,8 @@ struct Rules {
   int startRings = -1, startLives = -1, timeLimit = -1;
 } g;
 
-std::filesystem::path exe_dir() {
-  wchar_t w[MAX_PATH];
-  GetModuleFileNameW(nullptr, w, MAX_PATH);
-  return std::filesystem::path(w).parent_path();
+std::filesystem::path exe_dir() {   // next to the program on the PC, the app's folder on Android (plat.h)
+  return std::filesystem::path(plat::base_dir());
 }
 std::string slurp(const std::filesystem::path& p) {
   std::ifstream f(p);

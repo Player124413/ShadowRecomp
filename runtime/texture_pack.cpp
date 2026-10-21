@@ -22,7 +22,7 @@
 #define STB_TRUETYPE_IMPLEMENTATION
 #define STBTT_STATIC
 #include <imstb_truetype.h>   // TrueType rasteriser (ships with Dear ImGui): card template text
-#include <windows.h>
+#include "plat.h"
 #include <algorithm>
 #include <array>
 #include <atomic>
@@ -58,9 +58,7 @@ fs::path folder() {
     std::error_code ec;
     if (fs::is_directory(p, ec)) return p;
   }
-  wchar_t exe[MAX_PATH];
-  GetModuleFileNameW(nullptr, exe, MAX_PATH);
-  return fs::path(exe).parent_path() / L"textures" / L"Custom";
+  return fs::path(plat::base_dir()) / "textures" / "Custom";
 }
 
 // ---- UI masters
@@ -87,10 +85,8 @@ std::vector<SheetLayout> g_layout_sheets;
 std::unordered_map<std::string, std::pair<std::shared_ptr<MasterImage>, const SheetLayout*>> g_built;   // virtual path ->
 int g_built_count = 0;
 
-fs::path exe_dir() {
-  wchar_t exe[MAX_PATH];
-  GetModuleFileNameW(nullptr, exe, MAX_PATH);
-  return fs::path(exe).parent_path();
+fs::path exe_dir() {   // next to the program on the PC, the app's folder on Android (plat.h)
+  return fs::path(plat::base_dir());
 }
 
 void read_layout() {   // once; ui_masters.txt is written by tools/ui_master.py
@@ -811,7 +807,7 @@ void index_originals() {   // under g_orig_mutex
          !ec && it != fs::recursive_directory_iterator(); it.increment(ec)) {
       if (!it->is_regular_file(ec)) continue;
       const fs::path& p = it->path();
-      if (p.native().find(L"\\UI\\") != std::wstring::npos) continue;
+      if (p.native().find(LRT_S "UI" RT_S "") != std::wstring::npos) continue;
       std::string k = key_of(p);
       if (!k.empty()) g_orig_index.emplace(k, p);
     }
