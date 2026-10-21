@@ -1,5 +1,8 @@
 cmake_minimum_required(VERSION 3.25)
-project(ShadowRecomp C CXX RC)
+project(ShadowRecomp C CXX)
+if(WIN32)
+  enable_language(RC)          # the exe icon; Android has no resource compiler
+endif()
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_C_STANDARD 11)
@@ -12,12 +15,17 @@ set(AURORA_ENABLE_TESTS OFF CACHE BOOL "" FORCE)
 set(AURORA_ENABLE_EXAMPLES OFF CACHE BOOL "" FORCE)
 file(TO_CMAKE_PATH "$ENV{USERPROFILE}/miniconda3" _conda)   # keep a user conda out of the package search
 set(CMAKE_IGNORE_PREFIX_PATH "${_conda}" CACHE STRING "" FORCE)
+if(ANDROID)
+  # libSDL3.so, as SDL3's own Android project does: its Java activity loads it by name before libmain.so.
+  set(AURORA_SDL3_LINKAGE shared CACHE STRING "" FORCE)
+endif()
 add_subdirectory(third_party/aurora ${CMAKE_BINARY_DIR}/aurora EXCLUDE_FROM_ALL)
 
 include(generated/files.cmake)
 file(GLOB RT_SOURCES ${CMAKE_CURRENT_LIST_DIR}/runtime/*.cpp)
 # The exe icon and launcher art (runtime/shadow.ico, runtime/assets/*.png) come from the game, so they are not in git:
 # a fresh clone builds with the neutral placeholders instead. An existing file is never replaced.
+if(NOT ANDROID)
 foreach(pair "shadow.ico=icon.ico" "assets/emblem.png=emblem.png" "assets/hero.png=hero.png")
   string(REPLACE "=" ";" pair "${pair}")
   list(GET pair 0 dst)
@@ -27,6 +35,7 @@ foreach(pair "shadow.ico=icon.ico" "assets/emblem.png=emblem.png" "assets/hero.p
     file(COPY_FILE ${CMAKE_CURRENT_LIST_DIR}/tools/release/placeholder/${src} ${CMAKE_CURRENT_LIST_DIR}/runtime/${dst})
   endif()
 endforeach()
+endif()
 # WIN32: a normal Windows program (no console window when double-clicked); runtime/shadow.rc embeds the icon.
 # #137 build number: version (VERSION file) + configure time + short git hash -> one generated source file
 set(SHADOW_VERSION "dev")
@@ -47,6 +56,45 @@ else()
   endif()
 endif()
 configure_file(${CMAKE_CURRENT_LIST_DIR}/runtime/build_info.cpp.in ${CMAKE_BINARY_DIR}/build_info.cpp @ONLY)
+
+# ======================================================================================
+# Android (64-bit only: arm64-v8a for phones, x86_64 for the emulator)
+# ======================================================================================
+# Built by Gradle (android/): the app's native side is libmain.so, which SDL3 loads and enters through SDL_main.
+# Everything that is Windows-only (the Win32 launcher, the Win32 first-run window, the Win32 platform layer and the
+# icon/resource script) is left out; runtime/first_run_android.cpp and plat_posix.cpp take over. The Java sources of
+# SDL3 and of Aurora's surface are copied into the Gradle project here, so there is one source of truth for them.
+if(ANDROID)
+  set(SHADOW_ANDROID_DIR ${CMAKE_CURRENT_LIST_DIR}/android)
+  set(SHADOW_JAVA_OUT ${SHADOW_ANDROID_DIR}/app/src/main/java)
+  foreach(dir IN ITEMS "${AURORA_SDL3_JAVA_SOURCE_DIR}" "${AURORA_ANDROID_JAVA_SOURCE_DIR}")
+    if(IS_DIRECTORY "${dir}")
+      file(COPY "${dir}/" DESTINATION "${SHADOW_JAVA_OUT}")
+    endif()
+  endforeach()
+
+  list(FILTER RT_SOURCES EXCLUDE REGEX "/runtime/(launcher|first_run|plat_win)\\.cpp$")
+  add_library(main SHARED ${RT_SOURCES} ${GEN_SOURCES} ${CMAKE_BINARY_DIR}/build_info.cpp)
+  target_include_directories(main PRIVATE runtime generated third_party/aurora/lib third_party/aurora/include)
+  # -O3 and no frame pointers: the game is one thread of interdependent work and 60 fps is the target on every phone.
+  # No fast-math: the emulated PPC code must round exactly like the console.
+  target_compile_options(main PRIVATE -O3 -fno-strict-aliasing -fomit-frame-pointer -ffunction-sections -fdata-sections)
+  target_link_options(main PRIVATE -Wl,--gc-sections -Wl,--as-needed)
+  target_compile_definitions(main PRIVATE WEBGPU_DAWN)
+  find_library(SHADOW_ANDROID_LOG log)
+  find_library(SHADOW_ANDROID_ANDROID android)
+  target_link_libraries(main PRIVATE aurora_gx aurora_core aurora_vi ${AURORA_SDL3_TARGET}
+      absl::btree absl::flat_hash_map Tracy::TracyClient dawn::webgpu_dawn sqlite3 PNG::PNG
+      ${SHADOW_ANDROID_LOG} ${SHADOW_ANDROID_ANDROID} EGL GLESv3)
+
+  # Gradle picks the libraries up from here (android/app/build.gradle: jniLibs.srcDir).
+  set_target_properties(main PROPERTIES LIBRARY_OUTPUT_DIRECTORY ${SHADOW_ANDROID_DIR}/app/src/main/jniLibs/${CMAKE_ANDROID_ARCH_ABI})
+  return()
+endif()
+
+# ======================================================================================
+# Windows
+# ======================================================================================
 add_executable(shadow WIN32 ${RT_SOURCES} ${GEN_SOURCES} runtime/shadow.rc ${CMAKE_BINARY_DIR}/build_info.cpp)
 target_include_directories(shadow PRIVATE runtime generated third_party/aurora/lib third_party/aurora/include)
 target_compile_options(shadow PRIVATE -O2 -gcodeview -gline-tables-only -fno-strict-aliasing -fno-asynchronous-unwind-tables -w)

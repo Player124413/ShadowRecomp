@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- A red ring with a streak through it: the port's own mark. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path
+        android:strokeColor="#E23B4E"
+        android:strokeWidth="7"
+        android:fillColor="#00000000"
+        android:pathData="M54,30a24,24 0 1,0 0.1,0z" />
+    <path
+        android:fillColor="#F2F4FA"
+        android:pathData="M34,52h34l-7,8h-30z" />
+    <path
+        android:fillColor="#F2F4FA"
+        android:pathData="M42,64h26l-6,8h-24z" />
+</vector>

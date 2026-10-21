@@ -1,0 +1,73 @@
+plugins {
+    id 'com.android.application'
+}
+
+// The native side comes from ../../CMakeLists.txt: libmain.so is libmain.so + SDL3, and SDL3's Java classes plus
+// Aurora's surface are copied into app/src/main/java by CMake at configure time (one source of truth for them).
+android {
+    namespace = 'dev.shadowrecomp'
+    compileSdk = 35
+    ndkVersion = '27.0.12077973'
+
+    defaultConfig {
+        applicationId = 'dev.shadowrecomp'
+        minSdk = 26                 // Vulkan 1.0 + ETC2 required by the renderer (every 64-bit phone has them)
+        targetSdk = 35
+        versionCode = 1
+        versionName = '1.0'
+
+        // 64-bit only: the port is aimed at 64-bit phones, and 32-bit devices cannot run this game at 60 fps.
+        ndk {
+            abiFilters 'arm64-v8a', 'x86_64'
+        }
+        externalNativeBuild {
+            cmake {
+                arguments '-DANDROID_STL=c++_static', '-DANDROID_PLATFORM=android-26',
+                          '-DCMAKE_BUILD_TYPE=Release'
+                cppFlags '-std=c++20'
+            }
+        }
+    }
+
+    externalNativeBuild {
+        cmake {
+            path '../../CMakeLists.txt'
+            version '3.25.1'
+        }
+    }
+
+    sourceSets {
+        main {
+            // libmain.so + SDL3 (CMake writes them here)
+            jniLibs.srcDirs = ['src/main/jniLibs']
+            // CMake copies SDL3's org.libsdl.app and Aurora's dev.encounter.aurora here
+            java.srcDirs = ['src/main/java']
+        }
+    }
+
+    buildTypes {
+        debug {
+            debuggable true
+            jniDebuggable true
+        }
+        release {
+            minifyEnabled false
+            proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
+        }
+    }
+
+    packagingOptions {
+        jniLibs {
+            useLegacyPackaging = false
+            // the game ships its own libraries: they must not be compressed or renamed
+            keepDebugSymbols += ['**/libmain.so']
+        }
+    }
+
+    lint {
+        abortOnError = false
+    }
+}
+
+// Copy the built libraries from CMake's output to the packaging folder is done by CMake itself
+// (LIBRARY_OUTPUT_DIRECTORY), so nothing to do here.

@@ -45,12 +45,42 @@
 !/tools/game_import/
 !/tools/menu/
 !/tools/audio/
+# portable test of the touch layout format (runtime/touch_layout.cpp) - no game files, needs only g++
+!/tools/android/
 !/tools/stage_editor/
 !/tools/tilesets/
 # neutral icon / art the build uses when the game-derived ones are not there (fresh clone)
 !/tools/release/
 /tools/release/*
 !/tools/release/placeholder/
+
+# --- Android: the launcher and the Gradle project -------------------------------------------------
+!/android/
+!/android/settings.gradle
+!/android/build.gradle
+!/android/gradle.properties
+!/android/README.md
+!/android/app/build.gradle
+!/android/app/proguard-rules.pro
+!/android/app/src/main/AndroidManifest.xml
+!/android/app/src/main/res/
+/android/app/src/main/res/*/*.png
+!/android/app/src/main/java/
+!/android/app/src/main/java/dev/
+!/android/app/src/main/java/dev/shadowrecomp/
+# SDL3's org.libsdl.app and Aurora's dev.encounter.aurora are copied in by CMake (not ours, not committed)
+/android/app/src/main/java/org/
+/android/app/src/main/java/dev/encounter/
+# build outputs and the packaged libraries
+/android/local.properties
+/android/.gradle/
+/android/build/
+/android/app/build/
+/android/app/.cxx/
+/android/app/src/main/jniLibs/
+/android/.idea/
+*.jks
+*.keystore
 
 # --- work: only the symbol map tools/gen.py reads (names + addresses, no game code) --------------
 !/work/

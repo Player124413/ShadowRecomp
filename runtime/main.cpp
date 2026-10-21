@@ -5,6 +5,8 @@
 #include "input.h"
 #include "settings_ui.h"
 #include "first_run.h"
+#include "perf.h"
+#include "touch.h"
 #include "plat.h"
 #ifdef _WIN32
 #include <shellapi.h>
@@ -16,6 +18,11 @@
 #include <cstdio>
 #ifndef _WIN32
 #include <unistd.h>
+#endif
+#if defined(__ANDROID__)
+// On Android there is no process to start: SDL3's Java activity loads libmain.so and calls SDL_main, so the entry
+// point below is renamed by this header (it is the only way SDL finds it).
+#include <SDL3/SDL_main.h>
 #endif
 
 extern void f_80003154(Cpu&);
@@ -92,6 +99,9 @@ int main(int argc, char** argv) {
   bool no_launcher = getenv("SHADOW_NO_LAUNCHER") != nullptr;
   bool builtin_launcher = false;   // --builtin-launcher: the old in-window launcher (launcher.cpp)
   bool with_launcher = false;      // --with-launcher: also open the launcher window (ShadowLauncher.exe / .pyw) as before
+  bool edit_touch = false;         // --edit-touch: the launcher's "Edit the touch controls": start with the editor open
+  const char* perf_preset = nullptr;   // --perf auto|quality|balanced|performance (the Android launcher's choice)
+  int perf_scale = 0;              // --render-scale 0 auto / 1 50 % / 2 75 % / 3 native
   settings::load();   // shadow_settings.ini; command-line flags below override it
   gxlle::g_render_height = settings::g.height;
   gxlle::g_widescreen = settings::g.widescreen;
@@ -125,7 +135,15 @@ int main(int argc, char** argv) {
     else if (!strcmp(argv[i], "--story")) { g_boot_story = true; g_mash = true; }   // the launcher's Story button: continue the save's story
     // Android: the launcher's device report (soc=..., cores=..., ram_mb=...) for the performance presets (perf.cpp)
     else if (!strcmp(argv[i], "--device-info") && i + 1 < argc) plat::android_set_info(argv[++i]);
+    // Android launcher: the graphics preset, the render-resolution slider, the touch overlay and "edit the controls"
+    else if (!strcmp(argv[i], "--perf") && i + 1 < argc) perf_preset = argv[++i];
+    else if (!strcmp(argv[i], "--render-scale") && i + 1 < argc) perf_scale = atoi(argv[++i]);
+    else if (!strcmp(argv[i], "--touch") && i + 1 < argc) touch::set_enabled(atoi(argv[++i]) != 0);
+    else if (!strcmp(argv[i], "--edit-touch")) edit_touch = true;
   }
+  if (perf_preset) perf::apply(perf_preset);   // after settings::load(): the launcher's preset wins over the file
+  if (perf_scale) perf::apply_render_scale(perf_scale);
+  if (edit_touch) touch::open_editor();        // the overlay's editor is the control editor; there is no other
   if (getenv("TEST_STORY")) { g_boot_story = true; g_boot_stage = 0; g_mash = true; }   // testing: wsassert's --stage copy, booted as --story
   g_time_scale = g_base_scale;
 
