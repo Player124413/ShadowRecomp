@@ -79,33 +79,43 @@ long and wants about 10 GB — do it only if you need it.
 | `compile` | compiles **every** native file for `arm64-v8a` with the real NDK. `tools/android/stub_generated.py` writes a stand-in `generated/`, so nothing needs the disc; the link step is deliberately not attempted | nothing |
 | `apk` | the installable APK | the game code, or the `main.dol` it comes from |
 
-The APK job cannot invent the game: `generated/` is code from your own `main.dol`. There is a secret for that, and it
-takes a tarball in any of three shapes - the workflow works out which one it got:
+The APK job cannot invent the game: `generated/` is code from your own `main.dol`. You can hand it a link at the moment
+you start the build, so nothing has to be stored in the repository:
+
+1. Put the file on Hugging Face (a model, dataset or space repo all work) or anywhere that serves it directly.
+2. **Actions → Android APK → Run workflow**, and paste the link into **game_code_url**.
+3. When it finishes, download the artifact **`shadowrecomp-android-arm64-debug`**.
+
+The link may point at a `.tar.gz`, `.tgz`, `.tar.xz` or `.zip`, or at a single file. These are all accepted:
 
 | What you upload | Size | What the job does |
 | --- | --- | --- |
 | `generated/` | ~200 MB | uses it as is (fastest) |
 | your disc folder (`sys/main.dol` + `files/`) | ~1.4 GB | runs `tools/gen.py` on it here |
-| `main.dol` alone | ~5 MB | runs `tools/gen.py` on it here - usually the easiest |
+| `main.dol` alone - as a file, or inside an archive | ~5 MB | runs `tools/gen.py` on it here (usually the easiest) |
+
+On Hugging Face, use the **direct** link, not the file page: `.../resolve/main/main.dol` (the "Download" button gives
+exactly that) rather than `.../blob/main/main.dol`. A file page answers with HTML, and the build stops with a message
+saying so instead of pretending. For a private repo, a link with `?download=true` and a token also works, but remember
+that the URL you paste is visible in the run's log.
 
 ```sh
-# main.dol on its own is enough and is the smallest thing to upload:
-tar -czf main.dol.tar.gz -C "<disc folder>/sys" main.dol
-
+# the smallest thing to upload - about 5 MB, and it is all tools/gen.py needs:
+tar -czf main.dol.tar.gz -C "<disc folder>/sys" main.dol     # or just upload main.dol itself
 # or, if you have already run tools/gen.py:
 tar -czf generated.tar.gz generated/
-# upload it somewhere with a direct link (a release asset of a private repo, a private gist, S3 with a signed URL...)
-#   Settings → Secrets and variables → Actions → New repository secret
-#   name: SHADOW_GEN_URL   value: <the URL>
 ```
 
 `main.dol` is checked against the SHA-1 of the USA release (`118ef49e...`) before anything is built, so a PAL or
-Japanese dump fails loudly instead of producing an APK that crashes on the phone. Do not put the disc or `generated/`
-in the repository: `generated/` is the game's compiled code, and the secret exists so that it can stay out of git.
+Japanese dump fails loudly instead of producing an APK that crashes on the phone.
 
-Without the secret the job builds a **launcher-only** APK instead (`tools/android/stub_generated.py --definitions`):
-the same packaging path with empty stand-ins, so the Gradle/NDK/SDL3 side is still tested on every push. It installs and
-shows the launcher but cannot play.
+If you would rather not paste the link every time, save it as the repository secret `SHADOW_GEN_URL`; a value typed into
+**Run workflow** wins over it. Do not put the disc or `generated/` in the repository: `generated/` is the game's compiled
+code.
+
+Without a link the job builds a **launcher-only** APK instead (`tools/android/stub_generated.py --definitions`): the same
+packaging path with empty stand-ins, so the Gradle/NDK/SDL3 side is still tested on every push. It installs and shows the
+launcher but cannot play.
 
 ## First run
 

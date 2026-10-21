@@ -11,11 +11,14 @@ name: Android APK
 #                   WITHOUT the game code: tools/android/stub_generated.py stands in for generated/, and every object
 #                   file is built while the link is left out. This is the check that catches "it stopped building".
 #   apk           - the actual installable APK. The recompiled game code only exists on the machine of someone who owns
-#                   the disc, so with the SHADOW_GEN_URL secret pointing at a .tar.gz (of generated/, of a disc folder, or
-#                   of main.dol alone - tools/gen.py is run here for the last two) this builds the real thing. Without it, it builds a *launcher-only* APK instead: the same Gradle/NDK/SDL3/CMake packaging
-#                   path, with empty stand-ins in place of the game code (tools/android/stub_generated.py --definitions).
-#                   That one installs and shows the launcher but cannot play; it exists so the packaging itself is built
-#                   and tested on every push rather than on the one machine that owns a disc.
+#                   the disc, so this job asks for a link to it: "Run workflow" has a box called `game_code_url`, and a
+#                   Hugging Face link (or any direct link) to a .tar.gz / .zip of generated/, of a disc folder, or of
+#                   main.dol alone is enough - tools/gen.py is run here for the last two. A repository secret
+#                   SHADOW_GEN_URL still works as the default for pushes, if you would rather not paste it each time.
+#                   Without either, it builds a *launcher-only* APK: the same Gradle/NDK/SDL3/CMake packaging path, with
+#                   empty stand-ins in place of the game code (tools/android/stub_generated.py --definitions). That one
+#                   installs and shows the launcher but cannot play; it exists so the packaging itself is built and
+#                   tested on every push rather than on the one machine that owns a disc.
 #
 # Nothing here touches the game's data: the disc image, the DOL and generated/ are never committed, and the APK artifact
 # contains the recompiled code, not the disc.
@@ -39,6 +42,14 @@ on:
       - 'tools/android/**'
       - 'CMakeLists.txt'
   workflow_dispatch:
+    inputs:
+      game_code_url:
+        description: >-
+          Link to the game code for the APK: a Hugging Face (or any) direct link to a .tar.gz / .zip of generated/,
+          of a disc folder, or of main.dol alone. Leave empty to build the launcher-only APK.
+        required: false
+        default: ''
+        type: string
 
 permissions:
   contents: read
@@ -240,55 +251,79 @@ jobs:
       - uses: actions/checkout@v4
 
       - id: gamecode
-        name: Is the recompiled game code available?
+        name: Is the game code available?
         env:
-          GEN_URL: ${{ secrets.SHADOW_GEN_URL }}
+          # What you typed into "Run workflow" wins over the secret, so the secret can stay empty (or stale).
+          INPUT_URL: ${{ inputs.game_code_url }}
+          SECRET_URL: ${{ secrets.SHADOW_GEN_URL }}
         run: |
-          if [ -n "$GEN_URL" ]; then
+          url="${INPUT_URL:-$SECRET_URL}"
+          if [ -n "$url" ]; then
             echo "have=yes" >> "$GITHUB_OUTPUT"
-            echo "::notice::Building the real APK from the tarball in SHADOW_GEN_URL (generated/, a disc folder, or main.dol)."
+            echo "url=$url" >> "$GITHUB_OUTPUT"
+            # Do not echo the whole link: a private Hugging Face link can carry a token in it.
+            echo "::notice::Building the real APK from the link you gave (generated/, a disc folder, or main.dol)."
           else
             echo "have=no" >> "$GITHUB_OUTPUT"
-            echo "::notice::No SHADOW_GEN_URL secret, so there is no game code to link: building a *launcher-only* APK "\
-                 "instead (it installs and shows the launcher, but cannot play). For the real one, put a .tar.gz of "\
-                 "generated/, of your disc folder, or of main.dol alone somewhere with a direct link and set SHADOW_GEN_URL "\
-                 "to it - see android/README.md."
+            echo "::notice::No link and no secret, so there is no game code to link: building a *launcher-only* APK "\
+                 "instead (it installs and shows the launcher, but cannot play). For the real one, run this workflow "\
+                 "again with game_code_url set to a Hugging Face (or any direct) link to a .tar.gz/.zip of generated/, "\
+                 "of your disc folder, or of main.dol alone - see android/README.md."
           fi
 
       - name: Fetch the game code (or the disc it comes from)
         if: steps.gamecode.outputs.have == 'yes'
         env:
-          GEN_URL: ${{ secrets.SHADOW_GEN_URL }}
+          URL: ${{ steps.gamecode.outputs.url }}
         run: |
           set -euo pipefail
-          curl -fsSL --retry 3 -o /tmp/gamecode.tar.gz "$GEN_URL"
+          # -L follows the redirect Hugging Face answers with (huggingface.co -> cdn-lfs.huggingface.co); --retry
+          # survives the occasional reset. What lands is either an archive or a single file, and both are accepted:
+          #   .tar.gz / .tgz / .zip of generated/, of a disc folder (sys/main.dol + files/), or of main.dol alone;
+          #   or main.dol itself, hosted as one file (the usual Hugging Face "upload a file" case).
+          curl -fsSL --retry 3 --retry-delay 2 -o /tmp/gamecode.bin "$URL"
+          echo "downloaded $(stat -c%s /tmp/gamecode.bin) bytes"
+          # A Hugging Face *file page* (huggingface.co/user/repo/blob/main/...) answers with HTML, not with the file.
+          # Say that plainly instead of downloading 12 kB of web page and calling it a disc.
+          if head -c 512 /tmp/gamecode.bin | grep -qiE '<!doctype html|<html'; then
+            echo "::error ::that link is a web page, not a file. On Hugging Face use the direct link: the \"Download\" /"
+            echo "::error ::raw button, or .../resolve/main/<file name> in place of .../blob/main/<file name>"
+            exit 1
+          fi
           rm -rf /tmp/gamecode && mkdir -p /tmp/gamecode
-          tar -xzf /tmp/gamecode.tar.gz -C /tmp/gamecode
-          # Three shapes are accepted, because recompiling needs nothing but the DOL and it is much smaller than the
-          # code it produces:
-          #   1. generated/files.cmake  - the recompiled code, ready to use;
-          #   2. sys/main.dol           - a disc folder (what Dolphin or tools/game_import produces);
-          #   3. main.dol               - the file on its own.
-          # In cases 2 and 3 tools/gen.py runs here, so nothing has to be generated on your machine.
-          gen_cmake=$(find /tmp/gamecode -maxdepth 5 -path '*/generated/files.cmake' | head -1 || true)
-          dol=$(find /tmp/gamecode -maxdepth 5 -name main.dol | head -1 || true)
+          if tar -tzf /tmp/gamecode.bin >/dev/null 2>&1; then
+            echo "archive: tar.gz"
+            tar -xzf /tmp/gamecode.bin -C /tmp/gamecode
+          elif tar -tJf /tmp/gamecode.bin >/dev/null 2>&1; then
+            echo "archive: tar.xz"
+            tar -xJf /tmp/gamecode.bin -C /tmp/gamecode
+          elif unzip -tq /tmp/gamecode.bin >/dev/null 2>&1; then
+            echo "archive: zip"
+            unzip -q /tmp/gamecode.bin -d /tmp/gamecode
+          else
+            echo "not an archive: treating it as main.dol"
+            mkdir -p /tmp/gamecode/sys && cp /tmp/gamecode.bin /tmp/gamecode/sys/main.dol
+          fi
+
+          gen_cmake=$(find /tmp/gamecode -maxdepth 6 -path '*/generated/files.cmake' | head -1 || true)
+          dol=$(find /tmp/gamecode -maxdepth 6 -name main.dol | head -1 || true)
           if [ -n "$gen_cmake" ]; then
-            echo "tarball: recompiled code ($(dirname "$(dirname "$gen_cmake")"))"
+            echo "found recompiled game code in $(dirname "$(dirname "$gen_cmake")")"
             mkdir -p generated && cp -a "$(dirname "$gen_cmake")/." generated/
           elif [ -n "$dol" ]; then
-            echo "tarball: $dol - recompiling with tools/gen.py"
+            echo "found $dol - recompiling it with tools/gen.py"
             mkdir -p /tmp/disc/sys && cp "$dol" /tmp/disc/sys/main.dol
             python3 -c "import hashlib,sys; h=hashlib.sha1(open('/tmp/disc/sys/main.dol','rb').read()).hexdigest(); \
               print('main.dol sha1:', h); sys.exit(0 if h=='118ef49ebd45b371b6f514e0e1b6d1ba7cf12904' else 1)" \
-              || { echo "::error ::this main.dol is not the USA release (GUPE8P rev 0) - the game would not run"; exit 1; }
+              || { echo "::error ::that main.dol is not the USA release (GUPE8P rev 0) - the game would not run"; exit 1; }
             SHADOW_DISC=/tmp/disc python3 tools/gen.py
           else
-            echo "::error ::the tarball has neither generated/files.cmake nor a main.dol"
+            echo "::error ::the link has neither generated/files.cmake nor a main.dol in it"
             find /tmp/gamecode -maxdepth 3 | head -50
             exit 1
           fi
           test -f generated/files.cmake || { echo "::error ::no generated/files.cmake was produced"; exit 1; }
-          echo "translation units from the game: $(grep -c '\.cpp' generated/files.cmake) source files"
+          echo "game code source files: $(grep -c '\.cpp' generated/files.cmake)"
 
       - name: Stand-in generated/ (launcher-only APK)
         if: steps.gamecode.outputs.have == 'no'
