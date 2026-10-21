@@ -18,6 +18,22 @@
   measured from the point the thumb landed so a touch never starts at a deflection, the knob follows the thumb with a
   short trail and springs back to the centre, the deadzone is drawn, and a button press is animated. Floating sticks
   (the ring under the thumb) are still a choice in the editor, and now fade in instead of teleporting.
+- **Fixed: the world was black on Android.** Textures the console stored block-compressed were re-encoded to ETC2 (4 bits
+  per pixel) but uploaded into a texture still created as 32-bit RGBA8, so every one of them went up as garbage - in the
+  first stage that is most of the level, while the HUD (paletted / RGB5A3 art, which is not transcoded) looked normal.
+  The texture is now created with the format its bytes are in, and an upload whose size does not fit its format is
+  refused instead of reading past the buffer (release builds do not run those checks). This also removes the extra
+  upload traffic, which is part of the frame-rate problem.
+- Adaptive render resolution (`runtime/dynamic_resolution.cpp`): the height follows the frame times that are actually
+  delivered - down when frames are late (a stage with heavy overdraw, a phone getting warm), back up one small step at a
+  time when there is margin. The `quality` preset now starts at 900 lines instead of the panel's own height (the
+  launcher's resolution slider still offers Native), because a 2.4:1 1200-line panel is 2.5x the pixels of 720p for a
+  picture that is hard to tell apart on glass.
+- Pre-rendered movies: `SKIP` is a control on the touch overlay while one plays (it does not depend on the "cutscenes
+  you have already seen" option), the option itself now starts on for a fresh Android install, and the render height is
+  capped at 720 lines while a movie streams so the emulated Sofdec decoder gets the frame time instead of the GPU.
+- `[drs]` log line once every 5 s with the measured frame rate and render scale, `[gx] movie started/ended` and the
+  render height: what a "it runs at 40 fps" report needs to be actionable.
 - The Android build is built and packaged by GitHub Actions on every push (`.github/workflows/android-apk.yml`): the
   disc-free tests, a full arm64 compile of the native port, and an installable launcher-only APK. Set the
   `SHADOW_GEN_URL` secret to your own `generated/` tarball and the same job builds the real APK.

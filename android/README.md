@@ -164,6 +164,10 @@ both work. The parser and its test are platform-free (`tools/android/`):
 g++ -std=c++20 -Iruntime tools/android/touch_layout_test.cpp runtime/touch_layout.cpp -o t && ./t
 ```
 
+While a pre-rendered cutscene streams, the overlay shows one `SKIP` control (bottom centre) that jumps the movie to its
+tail; the `Skip any cutscene` setting (on for a fresh install on Android) additionally lets the `START` control skip
+one, and the render height is capped at 720 lines for the duration so the emulated video decoder gets the frame time.
+
 A connected Bluetooth/USB gamepad hides the overlay (`hide_with_gamepad=1`) and drives the game directly; a physical
 stick always wins over a thumb on the glass.
 
@@ -172,7 +176,11 @@ stick always wins over a thumb on the glass.
 The target is a locked 60 fps, so the port is built for it rather than tuned afterwards:
 
 * the render resolution is the launcher's slider (Auto / 50 % / 75 % / Native) and the presets start at 540p
-  (performance), 720p (balanced) or native (quality);
+  (performance), 720p (balanced) or 900p (quality; Native is on the slider for anyone who wants it);
+* adaptive resolution then follows the frame times actually delivered (`runtime/dynamic_resolution.cpp`): when frames
+  are late the render height comes down in steps of 5 %, and it goes back up one step at a time while there is a
+  margin. It is on for Android (`SHADOW_DRS=0` turns it off for an A/B), logs `[drs] ... fps, render scale ...` every
+  5 s, and never changes anything in the middle of a frame;
 * frame pacing sleeps to the frame's deadline instead of spinning the game's frame wait (a phone core burned per
   frame is heat, and heat is a lost frame budget a few minutes in) — `FR_NO_PACE=1` on a device turns it off to compare;
 * ETC2 is the mobile texture format, and the port uses it: console textures that were BC1 (CMPR) are re-encoded to

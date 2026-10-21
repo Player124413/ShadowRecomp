@@ -97,68 +97,11 @@ u16 wgpu_aniso(GXAnisotropy aniso) {
 }
 } // namespace
 
-TextureHandle new_static_texture_2d(uint32_t width, uint32_t height, uint32_t mips, u32 format, ArrayRef<uint8_t> data,
-                                    bool tlut, const char* label) noexcept {
-  ZoneScoped;
-
-  auto handle = new_dynamic_texture_2d(width, height, mips, format, label);
-  auto& ref = *handle;
-
-  ConvertedTexture converted;
-  if (ref.gxFormat != InvalidTextureFormat) {
-    if (tlut) {
-      CHECK(ref.size.height == 1, "new_static_texture_2d[{}]: expected tlut height 1, got {}", label, ref.size.height);
-      CHECK(ref.mipCount == 1, "new_static_texture_2d[{}]: expected tlut mipCount 1, got {}", label, ref.mipCount);
-      converted = convert_tlut(ref.gxFormat, ref.size.width, data);
-    } else {
-      converted = convert_texture(ref.gxFormat, ref.size.width, ref.size.height, ref.mipCount, data);
-    }
-    if (!converted.data.empty()) {
-      data = converted.data;
-      ref.hasArbitraryMips = converted.hasArbitraryMips;
-    }
-  }
-
-  uint32_t offset = 0;
-  for (uint32_t mip = 0; mip < mips; ++mip) {
-    const wgpu::Extent3D mipSize{
-        .width = std::max(ref.size.width >> mip, 1u),
-        .height = std::max(ref.size.height >> mip, 1u),
-        .depthOrArrayLayers = ref.size.depthOrArrayLayers,
-    };
-    const auto info = format_info(ref.format);
-    const auto physicalSize = physical_size(mipSize, info);
-    const uint32_t widthBlocks = physicalSize.width / info.blockWidth;
-    const uint32_t heightBlocks = physicalSize.height / info.blockHeight;
-    const uint32_t bytesPerRow = widthBlocks * info.blockSize;
-    const uint32_t dataSize = bytesPerRow * heightBlocks * mipSize.depthOrArrayLayers;
-    CHECK(offset + dataSize <= data.size(), "new_static_texture_2d[{}]: expected at least {} bytes, got {}", label,
-          offset + dataSize, data.size());
-    const wgpu::TexelCopyTextureInfo dstView{
-        .texture = ref.texture,
-        .mipLevel = mip,
-    };
-    if constexpr (UseTextureBuffer) {
-      queue_texture_upload_data(data.data() + offset, bytesPerRow, heightBlocks, std::move(dstView), physicalSize);
-    } else {
-      const wgpu::TexelCopyBufferLayout dataLayout{
-          .bytesPerRow = bytesPerRow,
-          .rowsPerImage = heightBlocks,
-      };
-      g_queue.WriteTexture(&dstView, data.data() + offset, dataSize, &dataLayout, &physicalSize);
-    }
-    offset += dataSize;
-  }
-  if (data.size() != UINT32_MAX && offset < data.size()) {
-    Log.warn("new_static_texture_2d[{}]: texture used {} bytes, but given {} bytes", label, offset, data.size());
-  }
-  return handle;
-}
-
-TextureHandle new_dynamic_texture_2d(uint32_t width, uint32_t height, uint32_t mips, u32 gxFormat,
-                                     const char* label) noexcept {
+namespace {
+// The one place a sampled texture is created: format first, everything else follows from it.
+TextureHandle new_texture_2d(uint32_t width, uint32_t height, uint32_t mips, u32 gxFormat,
+                             wgpu::TextureFormat wgpuFormat, const char* label) noexcept {
   ZoneScopedS(3);
-  const auto wgpuFormat = to_wgpu(gxFormat);
   const wgpu::Extent3D size{
       .width = width,
       .height = height,
@@ -188,6 +131,88 @@ TextureHandle new_dynamic_texture_2d(uint32_t width, uint32_t height, uint32_t m
   auto textureView = texture.CreateView(&textureViewDescriptor);
   return std::make_shared<TextureRef>(std::move(texture), std::move(textureView), wgpu::TextureView{}, size, wgpuFormat,
                                       mips, gxFormat);
+}
+} // namespace
+
+TextureHandle new_static_texture_2d(uint32_t width, uint32_t height, uint32_t mips, u32 format, ArrayRef<uint8_t> data,
+                                    bool tlut, const char* label) noexcept {
+  ZoneScoped;
+
+  // Convert first, create the texture second. The conversion can change the *GPU* format (ETC2 replaces RGBA8 on a
+  // phone), and a texture has to be created with the format its bytes are in: uploading 4-bit-per-pixel ETC2 blocks into
+  // an RGBA8 texture is what made every CMPR texture on Android - that is, most of the world - upload as garbage and
+  // show up black, while the UI (paletted / RGB5A3 art, which is not transcoded) looked fine.
+  ConvertedTexture converted;
+  if (format != InvalidTextureFormat) {
+    if (tlut) {
+      CHECK(height == 1, "new_static_texture_2d[{}]: expected tlut height 1, got {}", label, height);
+      CHECK(mips == 1, "new_static_texture_2d[{}]: expected tlut mipCount 1, got {}", label, mips);
+      converted = convert_tlut(format, width, data);
+    } else {
+      converted = convert_texture(format, width, height, mips, data);
+    }
+  }
+
+  // Empty converted data means "upload the caller's bytes as they are": then, and only then, the formula format is the
+  // one to use.
+  const wgpu::TextureFormat uploadFormat = converted.data.empty() ? to_wgpu(format) : converted.format;
+  auto handle = new_texture_2d(width, height, mips, format, uploadFormat, label);
+  auto& ref = *handle;
+  if (!converted.data.empty()) {
+    data = converted.data;
+    ref.hasArbitraryMips = converted.hasArbitraryMips;
+    if (ref.format != uploadFormat) {
+      Log.warn("new_static_texture_2d[{}]: upload format {} does not match the texture's {}", label,
+               static_cast<uint32_t>(uploadFormat), static_cast<uint32_t>(ref.format));
+    }
+  }
+
+  uint32_t offset = 0;
+  for (uint32_t mip = 0; mip < mips; ++mip) {
+    const wgpu::Extent3D mipSize{
+        .width = std::max(ref.size.width >> mip, 1u),
+        .height = std::max(ref.size.height >> mip, 1u),
+        .depthOrArrayLayers = ref.size.depthOrArrayLayers,
+    };
+    const auto info = format_info(ref.format);
+    const auto physicalSize = physical_size(mipSize, info);
+    const uint32_t widthBlocks = physicalSize.width / info.blockWidth;
+    const uint32_t heightBlocks = physicalSize.height / info.blockHeight;
+    const uint32_t bytesPerRow = widthBlocks * info.blockSize;
+    const uint32_t dataSize = bytesPerRow * heightBlocks * mipSize.depthOrArrayLayers;
+    CHECK(offset + dataSize <= data.size(), "new_static_texture_2d[{}]: expected at least {} bytes, got {}", label,
+          offset + dataSize, data.size());
+    if (offset + dataSize > data.size()) {
+      // A size mismatch is a bug above, never a reason to read past the buffer (release builds do not check): stop and
+      // keep the levels that were uploaded.
+      Log.error("new_static_texture_2d[{}]: level {} needs {} bytes, only {} left - upload truncated", label, mip,
+                dataSize, data.size() - offset);
+      break;
+    }
+    const wgpu::TexelCopyTextureInfo dstView{
+        .texture = ref.texture,
+        .mipLevel = mip,
+    };
+    if constexpr (UseTextureBuffer) {
+      queue_texture_upload_data(data.data() + offset, bytesPerRow, heightBlocks, std::move(dstView), physicalSize);
+    } else {
+      const wgpu::TexelCopyBufferLayout dataLayout{
+          .bytesPerRow = bytesPerRow,
+          .rowsPerImage = heightBlocks,
+      };
+      g_queue.WriteTexture(&dstView, data.data() + offset, dataSize, &dataLayout, &physicalSize);
+    }
+    offset += dataSize;
+  }
+  if (data.size() != UINT32_MAX && offset < data.size()) {
+    Log.warn("new_static_texture_2d[{}]: texture used {} bytes, but given {} bytes", label, offset, data.size());
+  }
+  return handle;
+}
+
+TextureHandle new_dynamic_texture_2d(uint32_t width, uint32_t height, uint32_t mips, u32 gxFormat,
+                                     const char* label) noexcept {
+  return new_texture_2d(width, height, mips, gxFormat, to_wgpu(gxFormat), label);
 }
 
 TextureHandle new_render_texture(uint32_t width, uint32_t height, u32 gxFormat, const char* label,
@@ -293,9 +318,12 @@ void write_texture(TextureRef& ref, ArrayRef<uint8_t> data) noexcept {
   ConvertedTexture converted;
   if (ref.gxFormat != InvalidTextureFormat) {
     converted = convert_texture(ref.gxFormat, ref.size.width, ref.size.height, ref.mipCount, data);
-    ref.hasArbitraryMips = converted.hasArbitraryMips;
-    if (!converted.data.empty()) {
+    // The texture already exists with a fixed format: only a conversion that lands in *that* format can be written
+    // into it. (A transcoded ETC2 buffer in an RGBA8 texture is the same bug new_static_texture_2d used to have; here
+    // the uncompressed bytes the caller passed are still valid for the texture, so they are simply used as they are.)
+    if (!converted.data.empty() && converted.format == ref.format) {
       data = converted.data;
+      ref.hasArbitraryMips = converted.hasArbitraryMips;
     }
   }
 
@@ -314,6 +342,11 @@ void write_texture(TextureRef& ref, ArrayRef<uint8_t> data) noexcept {
     const uint32_t dataSize = bytesPerRow * heightBlocks * mipSize.depthOrArrayLayers;
     CHECK(offset + dataSize <= data.size(), "write_texture: expected at least {} bytes, got {}", offset + dataSize,
           data.size());
+    if (offset + dataSize > data.size()) {
+      Log.error("write_texture: level {} needs {} bytes, only {} left - upload truncated", mip, dataSize,
+                data.size() - offset);
+      break;
+    }
     const wgpu::TexelCopyTextureInfo dstView{
         .texture = ref.texture,
         .mipLevel = mip,

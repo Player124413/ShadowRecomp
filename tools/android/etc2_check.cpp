@@ -70,9 +70,37 @@ void make_noise(Image& im) {
   for (int i = 3; i < (int)im.rgba.size(); i += 4) im.rgba[i] = 255;
 }
 
+// The upload contract: the byte count the encoder writes has to be exactly what a WebGPU texture of that size and mip
+// chain takes, because the uploader (gfx/texture.cpp) computes its own block counts from the *format* - a mismatch is
+// how a whole world of textures once went up as garbage. Recomputes the count the way the uploader does
+// (ceil(w/4)*ceil(h/4) blocks per level, levels halving) and compares.
+bool check_upload_size() {
+  const int sizes[][2] = {{4, 4}, {8, 8}, {16, 16}, {64, 64}, {32, 16}, {20, 12}, {128, 64}, {2, 2}, {1, 1}, {256, 128}};
+  bool ok = true;
+  for (const auto& sz : sizes) {
+    for (uint32_t mips = 1; mips <= 5; ++mips) {
+      if (mips > 1 && (uint32_t)std::min(sz[0], sz[1]) < (1u << (mips - 1))) continue;   // no more levels than pixels
+      size_t expect = 0;
+      for (uint32_t i = 0; i < mips; ++i) {
+        const uint32_t w = std::max(sz[0] >> i, 1), h = std::max(sz[1] >> i, 1);
+        expect += (size_t)((w + 3) / 4) * ((h + 3) / 4);
+      }
+      const size_t rgb = aurora::gfx::etc2::image_size((uint32_t)sz[0], (uint32_t)sz[1], mips);
+      const size_t rgba = aurora::gfx::etc2::image_size_rgba((uint32_t)sz[0], (uint32_t)sz[1], mips);
+      if (rgb != expect * 8 || rgba != expect * 16) {
+        printf("size mismatch: %dx%d %u mips: rgb %zu rgba %zu, blocks %zu\n", sz[0], sz[1], mips, rgb, rgba, expect);
+        ok = false;
+      }
+    }
+  }
+  printf("upload sizes: %s\n", ok ? "ok" : "MISMATCH");
+  return ok;
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
+  if (!check_upload_size()) return 1;
   const char* path = argc > 1 ? argv[1] : "etc2_blocks.bin";
   std::vector<Image> images(3);
   images[0] = Image{"gradient", 64, 64, {}, false};

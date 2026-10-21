@@ -1,6 +1,7 @@
 // PC settings: storage (shadow_settings.ini) and the in-game overlays that remain (FPS counter, fullscreen hint, PC
 // pause menu / gauges, F3 texture viewer). The settings themselves are edited in the launcher (launcher.cpp).
 #include "settings_ui.h"
+#include "dynamic_resolution.h"
 #include "game_menu.h"
 #include "bug_capture.h"
 #include "controls.h"
@@ -219,6 +220,7 @@ static bool set_key(const char* key, int v) {
   else if (!strcmp(key, "fullscreen")) g.fullscreen = v != 0;
   else if (!strcmp(key, "fps_target")) g.fps_target = v;
   else if (!strcmp(key, "show_fps")) g.show_fps = v != 0;
+  else if (!strcmp(key, "dynamic_resolution")) g.dynamic_resolution = v != 0;
   else if (!strcmp(key, "game_bloom")) g.game_bloom = v != 0;
   else if (!strcmp(key, "clip_ui_43")) g.clip_ui_43 = v != 0;
   else if (!strcmp(key, "cutscene_bars")) g.cutscene_bars = v != 0;
@@ -273,7 +275,12 @@ void load() {
     }
   }
   FILE* f = fopen(ini_path().c_str(), "r");
-  if (!f) return;
+  if (!f) {
+    // no settings file yet: the phone's own defaults (see below)
+    if (plat::is_android()) g.skip_any_cutscene = true;
+    return;
+  }
+  bool saw_skip_key = false;
   char line[1024];
   while (fgets(line, sizeof line, f)) {
     if (!strncmp(line, "bind_", 5)) {   // #169 controls: bind_pad_<action> / bind_kb_<action> (controls.cpp)
@@ -296,9 +303,14 @@ void load() {
     char key[64];
     int v;
     if (sscanf(line, "%63[^=]=%d", key, &v) != 2) continue;
+    if (!strcmp(key, "skip_any_cutscene")) saw_skip_key = true;
     set_key(key, v);
   }
   fclose(f);
+  // A phone has no keyboard to explain "START skips cutscenes you have already seen", and a movie the player has not
+  // watched yet is exactly the one they want to get past: on Android the option starts on (the touch SKIP control
+  // works either way). An ini that already holds the key keeps whatever the player chose.
+  if (plat::is_android() && !saw_skip_key) g.skip_any_cutscene = true;
   archive_lighting();
 }
 
@@ -343,6 +355,7 @@ void save() {
   if (!f) return;
   fprintf(f, "width=%d\nheight=%d\nwidescreen=%d\nfullscreen=%d\nfps_target=%d\nshow_fps=%d\ngame_bloom=%d\n", g.width, g.height,
           (int)g.widescreen, (int)g.fullscreen, g.fps_target, (int)g.show_fps, (int)g.game_bloom);
+  fprintf(f, "dynamic_resolution=%d\n", (int)g.dynamic_resolution);
   fprintf(f, "clip_ui_43=%d\ncutscene_bars=%d\nskip_any_cutscene=%d\nhud_169=%d\nwarp_enemy_counts=%d\n", (int)g.clip_ui_43, (int)g.cutscene_bars,
           (int)g.skip_any_cutscene, (int)g.hud_169, (int)g.warp_enemy_counts);
   fprintf(f, "fov_percent=%d\ncam_sens=%d\ninvert_cam_x=%d\ninvert_cam_y=%d\n", g.fov_percent, g.cam_sens, (int)g.invert_cam_x,
@@ -589,6 +602,7 @@ void draw() {
 // Display changes (launcher): render height / aspect, window size, saved.
 void apply_display() {
   gxlle::g_render_height = g.height;
+  drs::reset();   // the player's height is the new starting point for the adaptive scale
   bool aspect_changed = gxlle::g_widescreen != g.widescreen;
   gxlle::g_widescreen = g.widescreen;
   gxlle::apply_display_settings();

@@ -26,6 +26,10 @@
 #include <string>
 #include <vector>
 
+// hw.cpp: the movie stream / skip-request state (globals, hence declared here and not inside the unnamed namespace).
+extern uint64_t g_last_movie_read_ns, g_movie_start_ns, g_movie_skip_for, g_movie_skip_ns;
+extern bool g_movie_user_skip;
+
 namespace touch {
 namespace {
 
@@ -68,6 +72,30 @@ struct Visual {
 };
 std::vector<Visual> g_vis;
 uint64_t g_vis_ns = 0;
+
+// A pre-rendered movie (a .sfd stream) keeps hw.cpp's read timestamp fresh while it plays (the emulated Sofdec decoder
+// pulls it through the disc interface). That is the only reliable "a cutscene is on screen right now" signal, and the
+// SKIP control below is shown exactly while it is true. (The counters themselves are globals in hw.cpp.)
+bool movie_showing() {
+  return g_last_movie_read_ns != 0 && sys_time_ns() - g_last_movie_read_ns < 1000000000ull;
+}
+
+// The SKIP control, in screen fractions: one rectangle for drawing and for the hit test, so a thumb lands on what it
+// sees. Bottom centre, out of the way of the pad and of the game's own HUD (it lives at the top of the screen).
+constexpr float kSkipCx = 0.5f, kSkipCy = 0.865f, kSkipHx = 0.115f, kSkipHy = 0.062f;
+
+bool skip_button_at(float x, float y) {
+  return std::fabs(x - kSkipCx) <= kSkipHx && std::fabs(y - kSkipCy) <= kSkipHy;
+}
+
+// What the player asked for by pressing SKIP: the same request settings_ui.cpp makes when START is pressed, but not
+// gated on the "cutscenes you have not seen yet" option - pressing a control labelled SKIP is an explicit request.
+void request_movie_skip() {
+  g_movie_user_skip = true;
+  g_movie_skip_for = g_movie_start_ns;
+  g_movie_skip_ns = sys_time_ns();
+  logf("[skip] SKIP pressed on the touch overlay\n");
+}
 
 Visual& visual_for(int id) {
   for (auto& v : g_vis)
@@ -281,6 +309,12 @@ bool release(Held& h) {
 }
 
 void finger_down(SDL_FingerID id, float x, float y) {
+  if (movie_showing() && !g_editor && skip_button_at(x, y)) {   // before the pad: a movie is playing and this is
+                                                                 // the one control
+    request_movie_skip();
+    buzz(0.5f);
+    return;
+  }
   const Layout* real = active_const();
   if (!real || real->widgets.empty()) return;
   if (held_for(id)) return;
@@ -537,6 +571,25 @@ void draw_layer(bool editing) {
     const ImVec2 centre(w.x * screen.x, w.y * screen.y);
     const float r = w.r * short_px;
     draw_widget(dl, w, look, centre, r, visual_for(w0.id).press, w0.id == g_selected, editing);
+  }
+
+  // A movie is playing: say how to get past it. Drawn over everything else, in the one place nothing else lives.
+  if (!editing && movie_showing()) {
+    const ImVec2 c(kSkipCx * screen.x, kSkipCy * screen.y);
+    const ImVec2 half(kSkipHx * screen.x, kSkipHy * screen.y);
+    const float r = std::min(half.x, half.y);
+    const float pulse = 0.55f + 0.15f * std::sin((float)(sys_time_ns() % 1000000000ull) * 6.2831853f);
+    dl->AddRectFilled(ImVec2(c.x - half.x + 2, c.y - half.y + 3), ImVec2(c.x + half.x + 2, c.y + half.y + 3),
+                      IM_COL32(0, 0, 0, 110), r);
+    dl->AddRectFilled(ImVec2(c.x - half.x, c.y - half.y), ImVec2(c.x + half.x, c.y + half.y),
+                      IM_COL32(18, 20, 28, 215), r);
+    dl->AddRect(ImVec2(c.x - half.x, c.y - half.y), ImVec2(c.x + half.x, c.y + half.y),
+                IM_COL32(255, 255, 255, (int)(205 * pulse)), r, 0, std::max(2.0f, look.unit * 2.0f));
+    if (look.font) {
+      const float size = std::clamp(half.y * 0.85f, look.unit * 12, look.unit * 30);
+      const ImVec2 m = look.font->CalcTextSizeA(size, FLT_MAX, 0, "SKIP");
+      dl->AddText(look.font, size, ImVec2(c.x - m.x * 0.5f, c.y - m.y * 0.5f), IM_COL32(240, 244, 255, 245), "SKIP");
+    }
   }
 
   if (!g_toast.empty() && sys_time_ns() < g_toast_until) {

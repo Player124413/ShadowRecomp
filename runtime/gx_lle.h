@@ -17,7 +17,8 @@ extern bool g_game_bloom;      // settings: draw the game's bloom/glow pass
 extern uint64_t g_prof_ns[4];  // FPS_LOG profiling (ns): gp_run, Aurora processing, present
 uint64_t xfb_count();          // frames displayed so far (hang watchdog)
 int effective_render_height(); // render height actually in use
-void apply_display_settings(); // re-apply g_render_height / g_widescreen (settings UI)
+void apply_display_settings(bool quiet = false); // re-apply g_render_height / g_widescreen (settings UI);
+                                            // quiet: do not log (the adaptive-resolution steps)
 bool is_fullscreen();
 float widescreen_camera_factor(); // output aspect / (4/3) when widescreen, else 1 (3D camera widening)
 void fit_window_to_aspect();   // windowed: resize width to the current aspect

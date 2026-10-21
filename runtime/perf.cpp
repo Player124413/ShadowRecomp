@@ -10,6 +10,7 @@
 // "auto" only decides which of them to start from. The player can always change everything in the launcher again, and
 // every value is in the in-game menu too.
 #include "perf.h"
+#include "dynamic_resolution.h"
 #include "settings_ui.h"
 #include "gx_lle.h"
 #include "plat.h"
@@ -53,7 +54,11 @@ const char* pick_auto() {
 }
 
 void tier_quality() {
-  settings::g.height = 0;              // native: the phone's own panel, which is what "quality" means
+  // 900 lines instead of the panel's own height. A 2024 phone's panel is 1200-1440 lines tall, and drawing 2.5x the
+  // pixels of 720p for a picture nobody can tell apart on glass is how a phone ends up at 40 fps in the first stage.
+  // The launcher's resolution slider still offers Native for anyone who wants it, and the adaptive resolution above
+  // can climb to whatever the phone actually holds.
+  settings::g.height = 900;
   settings::g.fps_target = 60;
   settings::g.cutscene_fps_cap = 60;
   settings::g.game_bloom = true;
@@ -109,6 +114,7 @@ void apply(const char* preset) {
   }
   g_tier = name;
   gxlle::g_render_height = settings::g.height;
+  drs::reset();
   logf("[perf] preset %s (device: %s): %d lines, draw %d%% / objects %d%%, bloom %d, AO %d, lighting %d\n",
        g_tier.c_str(), plat::android_info().c_str(), settings::g.height, settings::g.draw_distance,
        settings::g.draw_objects, (int)settings::g.game_bloom, (int)settings::g.ao, (int)settings::g.light);
@@ -121,6 +127,7 @@ void apply_render_scale(int scale) {
   else if (scale == 2) settings::g.height = 720;
   else settings::g.height = 0;
   gxlle::g_render_height = settings::g.height;
+  drs::reset();   // a new height to adapt down from
   logf("[perf] render height %d (launcher: %s)\n", settings::g.height,
        settings::g.height == 0 ? "native" : scale == 1 ? "50 %" : "75 %");
 }

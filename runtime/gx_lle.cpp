@@ -11,6 +11,7 @@
 #include "game.h"
 #include "lighting_contact_ao.h"
 #include "lighting.h"
+#include "dynamic_resolution.h"
 
 #include <aurora/aurora.h>
 #include <aurora/event.h>
@@ -37,10 +38,12 @@ namespace first_boot_hint { void frame(); }   // first_boot_hint.cpp (#155)
 #include <unordered_map>
 #include <deque>
 extern bool g_mash;   // input.cpp (--fast auto-input; cleared when a stage loads)
+extern uint64_t g_last_movie_read_ns;   // hw.cpp: the last read of a .sfd movie stream
 
 using aurora::gx::g_gxState;
 
 namespace gxlle {
+static bool movie_streaming();          // effective_render_height(): is a pre-rendered movie on screen?
 bool g_trace = false;
 static bool g_aurora_up = false;
 static bool g_frame_active = false;
@@ -1530,6 +1533,26 @@ void present_frame() {
   } else {
     g_ws_factor = 1.0f;
   }
+  // Adaptive resolution (dynamic_resolution.cpp): the frame that just went out is the measurement, and a change is
+  // applied here, between frames, never in the middle of one.
+  {
+    static uint64_t last_present = 0;
+    static bool last_movie = false;
+    const uint64_t now = sys_time_ns();
+    const bool movie = movie_streaming();
+    const int before = effective_render_height();
+    if (last_present != 0 && now > last_present && !g_launcher_mode) {
+      const int fps = settings::g.fps_target > 0 ? settings::g.fps_target : 60;
+      drs::tick((double)(now - last_present) * 1e-9, 1.0 / (double)fps);
+    }
+    if (effective_render_height() != before || movie != last_movie) {
+      apply_display_settings(movie != last_movie ? false : true);
+      if (movie != last_movie) logf("[gx] movie %s: render height %d\n", movie ? "started" : "ended",
+                                    effective_render_height());
+    }
+    last_movie = movie;
+    last_present = now;
+  }
   const AuroraEvent* ev = aurora_update();
   while (ev && ev->type != AURORA_NONE) {
     if (ev->type == AURORA_EXIT) { logf("[gx] window close requested\n"); sys_dump_state("window closed"); sys_exit_guarded(0); }
@@ -1613,13 +1636,22 @@ static void apply_pending_fullscreen() {
 // error accumulates into a smear along the screen edges. Callable at any time (settings UI).
 // Render height in pixels: the chosen resolution, or the window's own pixel height (Auto). Any value works: the
 // render-grid bias (render_pixel_bias in Aurora's gx.cpp) is derived per axis from whatever scale results.
-int effective_render_height() {
-  if (g_render_height > 0) return g_render_height;
-  int pw = 0, ph = 0;
-  if (g_window) SDL_GetWindowSizeInPixels(g_window, &pw, &ph);
-  return ph > 0 ? ph : 480;
+static bool movie_streaming() {
+  return g_last_movie_read_ns != 0 && sys_time_ns() - g_last_movie_read_ns < 1000000000ull;
 }
-void apply_display_settings() {
+int effective_render_height() {
+  int wanted = g_render_height;
+  if (wanted <= 0) {
+    int pw = 0, ph = 0;
+    if (g_window) SDL_GetWindowSizeInPixels(g_window, &pw, &ph);
+    wanted = ph > 0 ? ph : 480;
+  }
+  // A pre-rendered movie is a video, not geometry: more than 720 lines buys nothing visible, and the frames the phone
+  // saves here are the ones the emulated Sofdec decoder (which runs on the guest CPU) needs most.
+  if (wanted > 720 && movie_streaming()) wanted = 720;
+  return drs::height_for(wanted);
+}
+void apply_display_settings(bool quiet) {
   int h = effective_render_height();
   aurora::window::set_frame_buffer_scale((float)h / 480.0f);
   g_ws_active = g_widescreen && !(settings::g.cutscene_bars && game::cutscene_active());
@@ -1628,11 +1660,11 @@ void apply_display_settings() {
     // perspective projections are corrected where written (XF 0x1020), 2D is squeezed per draw (ws_prepare_draw).
     aurora::window::set_frame_buffer_aspect_fit(false);
     AuroraSetViewportPolicy(AURORA_VIEWPORT_STRETCH);
-    logf("[gx] widescreen: render height %d, width follows the window aspect\n", h);
+    if (!quiet) logf("[gx] widescreen: render height %d, width follows the window aspect\n", h);
   } else {
     aurora::window::set_frame_buffer_aspect_fit(true);
     AuroraSetViewportPolicy(AURORA_VIEWPORT_FIT);
-    logf("[gx] render resolution %dx%d (4:3)\n", h * 4 / 3, h);
+    if (!quiet) logf("[gx] render resolution %dx%d (4:3)\n", h * 4 / 3, h);
   }
 }
 float widescreen_camera_factor() { return (g_ws_active && g_ws_factor > 0.0f && g_ws_factor < 0.999f) ? 1.0f / g_ws_factor : 1.0f; }

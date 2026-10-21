@@ -11,6 +11,9 @@ struct Values {
   int fps_target = 60;      // game frame rate: 60 = original pacing, N = run the game at N fps, 0 = unlimited
   int cutscene_fps_cap = 60;  // #122: frame rate while a cutscene plays (they animate in 1/60 s steps); 0 = no cap
   bool show_fps = false;
+  // Adaptive render resolution (dynamic_resolution.cpp): on a phone it is on unless the ini says otherwise; on a
+  // desktop it is opt-in, because a desktop that misses 60 Hz usually wants to know rather than to get a softer picture.
+  bool dynamic_resolution = false;
   bool game_bloom = true;   // the game's own glow/bloom pass
   int game_bloom_quality = 0;       // 0 Original (the game's blocky upscale, #141 default), 1 Smooth (3x3 tent, linear filter)
   int game_bloom_strength = 100;   // % of the game's bloom (0 = none, 100 = original, up to 200)
