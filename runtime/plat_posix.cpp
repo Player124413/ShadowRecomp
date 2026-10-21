@@ -285,6 +285,22 @@ bool GetFileAttributesExA(const char* path, int, WIN32_FILE_ATTRIBUTE_DATA* out)
   return true;
 }
 
+void GetSystemTimeAsFileTime(FILETIME* out) {
+  if (!out) return;
+  struct timespec ts{};
+  clock_gettime(CLOCK_REALTIME, &ts);
+  const uint64_t t = (uint64_t)ts.tv_sec * 10000000ull + (uint64_t)ts.tv_nsec / 100ull;
+  out->dwLowDateTime = (DWORD)(t & 0xFFFFFFFFu);
+  out->dwHighDateTime = (DWORD)(t >> 32);
+}
+
+int CompareFileTime(const FILETIME* a, const FILETIME* b) {
+  if (!a || !b) return 0;
+  const uint64_t x = ((uint64_t)a->dwHighDateTime << 32) | a->dwLowDateTime;
+  const uint64_t y = ((uint64_t)b->dwHighDateTime << 32) | b->dwLowDateTime;
+  return x < y ? -1 : x > y ? 1 : 0;
+}
+
 bool CreateDirectoryA(const char* path, void*) { return path && plat::make_dir(path); }
 
 bool CopyFileA(const char* from, const char* to, int fail_if_exists) {

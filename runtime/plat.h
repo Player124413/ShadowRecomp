@@ -124,6 +124,11 @@ bool CreateDirectoryA(const char* path, void* security);
 bool CopyFileA(const char* from, const char* to, int fail_if_exists);
 bool MoveFileExA(const char* from, const char* to, unsigned flags);
 uint64_t GetTickCount64();
+// MSVC intrinsics the runtime was written with (gx_lle.cpp byte-swaps 32-bit words): the compiler's own builtins on
+// clang and gcc, same names and types, so the call sites stay as they are.
+inline uint32_t _byteswap_ulong(uint32_t v) { return __builtin_bswap32(v); }
+inline uint16_t _byteswap_ushort(uint16_t v) { return __builtin_bswap16(v); }
+inline uint64_t _byteswap_uint64(uint64_t v) { return __builtin_bswap64(v); }
 void Sleep(unsigned ms);
 void timeBeginPeriod(unsigned ms);
 void timeEndPeriod(unsigned ms);
@@ -133,6 +138,9 @@ bool VirtualFree(void* addr, size_t size, unsigned type);
 #define MEM_RESERVE 0x2000
 #define MEM_RELEASE 0x8000
 #define PAGE_READWRITE 0x04
+
+void GetSystemTimeAsFileTime(FILETIME* out);                          // UTC, 100 ns units since 1601, as on Windows
+int CompareFileTime(const FILETIME* a, const FILETIME* b);            // -1 / 0 / 1
 
 HANDLE FindFirstFileA(const char* pattern, WIN32_FIND_DATAA* out);   // pattern may end in '*'
 bool FindNextFileA(HANDLE h, WIN32_FIND_DATAA* out);

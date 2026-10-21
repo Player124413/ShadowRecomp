@@ -24,28 +24,46 @@ import sys
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 OUT = os.path.join(ROOT, "generated")
 
-# Guest functions the runtime refers to directly: gen.py names them f_XXXXXXXX (the guest address).
+# Guest functions the runtime refers to directly: gen.py names them f_XXXXXXXX (the guest address), and the hand-written
+# overrides hle_<name>. Both take the emulated CPU, which is the only parameter shape that has to be supported here.
 CALL_RE = re.compile(r"\bf_[0-9A-Fa-f]{8}\b")
+HLE_RE = re.compile(r"\bhle_[A-Za-z0-9_]+\b")
+# "void hle_X(Cpu& c, uint32_t target)" - an override that takes more than the CPU. Those are declared by whoever needs
+# them; inventing a prototype for them here would clash with the definition.
+HLE_DEF = re.compile(r"\bvoid\s+(hle_[A-Za-z0-9_]+)\s*\(([^)]*)\)")
 
 
-def scan() -> list[str]:
-    names = set()
+def sources():
     for folder in ("runtime", "android"):
-        base = os.path.join(ROOT, folder)
-        for dirpath, _, files in os.walk(base):
+        for dirpath, _, files in os.walk(os.path.join(ROOT, folder)):
             for name in files:
-                if not name.endswith((".cpp", ".h", ".hpp")):
-                    continue
-                try:
-                    text = open(os.path.join(dirpath, name), encoding="utf-8", errors="ignore").read()
-                except OSError:
-                    continue
-                names.update(CALL_RE.findall(text))
-    return sorted(names)
+                if name.endswith((".cpp", ".h", ".hpp")):
+                    path = os.path.join(dirpath, name)
+                    try:
+                        yield name, open(path, encoding="utf-8", errors="ignore").read()
+                    except OSError:
+                        continue
+
+
+def scan() -> tuple[list[str], list[str]]:
+    guest = set()
+    hle = set()
+    odd_signature = set()
+    texts = list(sources())
+    for _, text in texts:
+        guest.update(CALL_RE.findall(text))
+        hle.update(HLE_RE.findall(text))
+        for name, params in HLE_DEF.findall(text):
+            # count the parameters: a "(Cpu& c, uint32_t target)" definition cannot be declared as "(Cpu&)"
+            if params.count(",") >= 1 and params.strip():
+                odd_signature.add(name)
+    hle -= odd_signature
+    return sorted(guest), sorted(hle)
 
 
 def main() -> int:
-    names = scan()
+    guest, hle = scan()
+    names = guest + hle
     os.makedirs(OUT, exist_ok=True)
     written = []
     files_cmake = os.path.join(OUT, "files.cmake")
@@ -69,7 +87,8 @@ def main() -> int:
         open(funcs_h, "w", encoding="utf-8").write(text)
         written.append("funcs.h")
 
-    print("stub generated/: %d guest functions declared%s" % (len(names), (", wrote " + ", ".join(written)) if written else ""))
+    print("stub generated/: %d functions declared (%d guest, %d hle)%s"
+          % (len(names), len(guest), len(hle), (", wrote " + ", ".join(written)) if written else ""))
     if not names:
         print("warning: no f_XXXXXXXX names found in runtime/ - did the layout change?", file=sys.stderr)
         return 1

@@ -6,6 +6,14 @@
 #include <vector>
 #ifdef _WIN32
 #include <windows.h>
+#elif defined(__ANDROID__)
+// Android: Bionic never implemented ucontext (there is no getcontext/makecontext there), so a fiber is a real thread
+// that stays parked on its own semaphore. Only one of them runs at a time - a switch posts the next fiber's semaphore
+// and waits for its own - so this is the same cooperative scheduling as elsewhere, only with the switch done by the
+// kernel. 16 MB of guest stack per fiber is reserved the same way as on the PC.
+#include <cerrno>
+#include <pthread.h>
+#include <semaphore.h>
 #else
 // Android and Linux: cooperative fibers on ucontext. The guest's threads (OSCreateThread / OSSaveContext) switch
 // exactly the same way as on the PC; only the switch primitive differs.
@@ -23,6 +31,10 @@ struct Fiber {
   int id = 0;
 #ifdef _WIN32
   void* handle = nullptr;          // Windows fiber
+#elif defined(__ANDROID__)
+  sem_t sem{};                     // the switch primitive: whoever wants us running posts this
+  pthread_t thread{};              // our own thread (fiber 0 is the caller's, so no thread of its own)
+  bool own_thread = false;
 #else
   ucontext_t ctx{};                // POSIX: the saved machine context
   void* stack = nullptr;           // its own stack (the main fiber has none: it is the caller's)
@@ -46,8 +58,9 @@ void CALLBACK fiber_main(void* p) {
   Fiber* f = (Fiber*)p;
 #else
 Fiber* g_starting = nullptr;       // the fiber a freshly made context starts (makecontext takes ints only)
-void fiber_entry() {
-  Fiber* f = g_starting;
+void fiber_entry(Fiber* f);
+void fiber_entry_trampoline() { fiber_entry(g_starting); }
+void fiber_entry(Fiber* f) {
 #endif
   logf("[sched] fiber %d starts at %08X lr=%08X r1=%08X\n", f->id, f->start_pc, f->start_lr, f->cpu->r[1]);
   Cpu& c = *f->cpu;
@@ -70,6 +83,44 @@ void* fiber_create(Fiber* f) { return CreateFiberEx(1 << 16, 16 << 20, 0, fiber_
 void fiber_destroy(Fiber* f) { if (f->handle) DeleteFiber(f->handle); }
 void fiber_switch(Fiber* from, Fiber* to) { (void)from; SwitchToFiber(to->handle); }
 void fiber_init_main(Fiber*) {}
+#elif defined(__ANDROID__)
+constexpr size_t kFiberStack = 16u << 20;   // as on the PC: the recompiled guest code uses big frame stacks
+void* fiber_thread(void* p) {
+  Fiber* f = (Fiber*)p;
+  sem_wait(&f->sem);                 // parked until someone switches to us
+  fiber_entry(f);
+  return nullptr;
+}
+void* fiber_create(Fiber* f) {
+  if (sem_init(&f->sem, 0, 0) != 0) return nullptr;
+  pthread_attr_t attr;
+  pthread_attr_init(&attr);
+  pthread_attr_setstacksize(&attr, kFiberStack);
+  const int rc = pthread_create(&f->thread, &attr, fiber_thread, f);
+  pthread_attr_destroy(&attr);
+  if (rc != 0) {
+    sem_destroy(&f->sem);
+    return nullptr;
+  }
+  f->own_thread = true;
+  return f;
+}
+void fiber_destroy(Fiber* f) {
+  if (!f->own_thread) return;        // fiber 0 runs on the caller's thread; its stack is not ours
+  // A fiber is only ever reclaimed once it can no longer be resumed. Wake it so its thread sees that and exits, then
+  // wait for it: freeing the semaphore under a parked thread would be a use-after-free.
+  sem_post(&f->sem);
+  pthread_join(f->thread, nullptr);
+  sem_destroy(&f->sem);
+  f->own_thread = false;
+}
+void fiber_switch(Fiber* from, Fiber* to) {
+  sem_post(&to->sem);
+  while (sem_wait(&from->sem) != 0 && errno == EINTR) {
+  }
+  if (from->dead) pthread_exit(nullptr);   // woken up to be reclaimed: this thread has nothing left to run
+}
+void fiber_init_main(Fiber* f) { sem_init(&f->sem, 0, 0); }
 #else
 constexpr size_t kFiberStack = 16u << 20;   // as on the PC: the recompiled guest code uses big frame stacks
 void* fiber_create(Fiber* f) {
@@ -82,7 +133,7 @@ void* fiber_create(Fiber* f) {
   f->ctx.uc_stack.ss_size = kFiberStack;
   f->ctx.uc_link = nullptr;
   g_starting = f;
-  makecontext(&f->ctx, fiber_entry, 0);
+  makecontext(&f->ctx, fiber_entry_trampoline, 0);
   return f;
 }
 void fiber_destroy(Fiber* f) {
