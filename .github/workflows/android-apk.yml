@@ -110,7 +110,7 @@ jobs:
         # The APK job links these when there is no disc code; a broken generator would only show up there.
         run: |
           python3 tools/android/stub_generated.py --definitions
-          g++ -std=c++20 -fsyntax-only -DSHADOW_STUB_GAME_CODE=1 -Igenerated generated/stub_definitions.cpp
+          g++ -std=c++20 -fsyntax-only -DSHADOW_STUB_GAME_CODE=1 -Igenerated -Iruntime generated/stub_definitions.cpp
           echo "stub_definitions.cpp compiles"
 
       - name: This workflow parses
