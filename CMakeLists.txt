@@ -180,7 +180,14 @@ if(ANDROID)
     get_target_property(_shadow_sdl_source_dir SDL3-shared SOURCE_DIR)
     set(_shadow_sdl_android "${_shadow_sdl_source_dir}/src/core/android/SDL_android.c")
     if(EXISTS "${_shadow_sdl_android}")
-      set_source_files_properties("${_shadow_sdl_android}" PROPERTIES COMPILE_OPTIONS "-fvisibility=default")
+      # DIRECTORY matters: source-file properties are per source *directory*, and this file is compiled in SDL's own
+      # directory, not in this one - without it the property is silently ignored.
+      set_source_files_properties("${_shadow_sdl_android}" DIRECTORY "${_shadow_sdl_source_dir}"
+        PROPERTIES COMPILE_OPTIONS "-fvisibility=default")
+      # Belt and braces: if SDL sets visibility again later in its flags, the linker is still told to export these two.
+      target_link_options(SDL3-shared PRIVATE
+        "-Wl,--export-dynamic-symbol=Android_LockActivityMutex"
+        "-Wl,--export-dynamic-symbol=Android_UnlockActivityMutex")
       message(STATUS "shadow: exporting SDL's Android activity mutex for Aurora's surface lock")
     else()
       message(WARNING "shadow: ${_shadow_sdl_android} not found - Aurora's surface lock may fail to link")
