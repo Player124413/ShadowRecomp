@@ -60,6 +60,7 @@
 !/android/build.gradle
 !/android/gradle.properties
 !/android/README.md
+!/android/PORT-STATUS.md
 !/android/app/build.gradle
 !/android/app/proguard-rules.pro
 !/android/app/src/main/AndroidManifest.xml
