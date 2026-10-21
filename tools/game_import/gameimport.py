@@ -127,11 +127,19 @@ def identify(path):
 # --- Dolphin's compressed formats: DolphinTool makes a temporary ISO -------------------------------------------------
 
 def find_dolphin_tool():
-    cands = [os.environ.get('SHADOW_DOLPHINTOOL', ''), shutil.which('DolphinTool') or '']
+    """DolphinTool, which is what converts RVZ/WIA/GCZ: SHADOW_DOLPHINTOOL, else PATH, else the usual install folders.
+
+    The executable is DolphinTool.exe on Windows and dolphin-tool (lower case) in Linux packages and in the macOS app
+    bundle, so both spellings are looked for.
+    """
+    cands = [os.environ.get('SHADOW_DOLPHINTOOL', '')]
+    cands += [shutil.which(name) or '' for name in ('DolphinTool', 'dolphin-tool', 'dolphin-emu-tool')]
     for base in (os.environ.get('ProgramFiles', r'C:\Program Files'), os.environ.get('ProgramFiles(x86)', ''),
                  os.path.join(os.environ.get('LOCALAPPDATA', ''), 'Programs')):
         if base:
             cands += [os.path.join(base, 'Dolphin', 'DolphinTool.exe'), os.path.join(base, 'Dolphin-x64', 'DolphinTool.exe')]
+    cands += ['/usr/bin/dolphin-tool', '/usr/local/bin/dolphin-tool',
+              '/Applications/Dolphin.app/Contents/MacOS/DolphinTool']   # Dolphin's macOS bundle
     return next((c for c in cands if c and os.path.isfile(c)), '')
 
 
