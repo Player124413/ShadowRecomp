@@ -41,6 +41,21 @@ cd android && gradle :app:assembleDebug
 # Android Studio: File > Open > (this) android/ folder, then Run
 ```
 
+### Without a disc yet: the launcher-only build
+
+If you want to see the launcher, the touch layout or the settings on a phone before you have run `tools/gen.py`, the
+build can link empty stand-ins for the game's functions instead of the real recompiled code:
+
+```sh
+cd android
+SHADOW_STUB_GAME_CODE=1 ./build.sh          # -Pshadow.stubGameCode=ON is passed to Gradle for you
+```
+
+That APK installs and runs, but it cannot play a disc: every guest function returns immediately, so "Play" gets you a
+black screen or an idle game loop. It is for checking the packaging (and it is what the CI workflow builds on every
+push, so the Gradle/NDK/SDL3 path is never silently broken). Build again without `SHADOW_STUB_GAME_CODE` once
+`generated/` is real.
+
 Install and watch the log:
 
 ```sh
