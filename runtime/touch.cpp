@@ -3,8 +3,10 @@
 // Input model
 //   * every finger is looked up against the active layout when it lands (a circle around each control);
 //   * a finger on a button keeps it pressed until it lifts, however far it slides (a thumb always drifts);
-//   * a finger on a stick becomes that stick's owner: in "floating" mode the stick starts where the thumb landed (the
-//     drawn control is only a hint where to put it), in "fixed" mode its centre is the drawn circle;
+//   * a finger on a stick becomes that stick's owner, and the axis is measured from the point it landed on - so a thumb
+//     that lands off-centre starts at rest instead of at a deflection. "floating" draws the ring under the thumb (the
+//     laid-out circle is only a hint where to put it), "fixed" keeps the ring where the layout puts it; the knob follows
+//     the thumb in both, with a short trail and a spring back to the centre, so the picture shows what the pad is told;
 //   * a finger is claimed by the first control it lands on, and a quick tap is seen through the SDL event watcher
 //     rather than the frame poll, so a press never falls between two frames.
 #include "touch.h"
@@ -49,9 +51,32 @@ struct Held {
   bool stick = false;
   bool camera = false;
   float fx = 0, fy = 0;            // where the finger is (0..1 of the window)
-  float ox = 0, oy = 0;            // the stick's origin (floating: where it landed)
+  float ox = 0, oy = 0;            // the stick's origin: where the thumb landed (never the drawn centre)
 };
 std::vector<Held> g_held;
+
+// What the overlay shows, animated. Input is applied the moment a finger moves (a laggy stick is a broken stick);
+// these values only smooth what is drawn, which is what makes a stick look like the ports: the knob follows the thumb
+// with a short trail, comes back to the centre on release instead of snapping, and a floating stick fades in where the
+// thumb landed instead of teleporting there.
+struct Visual {
+  int id = 0;
+  float kx = 0, ky = 0;      // the knob, -1..1 of the ring (screen axes: +x right, +y down)
+  float press = 0;           // buttons: 0 released .. 1 held (a quick scale + brightness)
+  float appear = 1;          // a floating stick: 0 just touched .. 1 settled
+  bool seen = false;
+};
+std::vector<Visual> g_vis;
+uint64_t g_vis_ns = 0;
+
+Visual& visual_for(int id) {
+  for (auto& v : g_vis)
+    if (v.id == id) return v;
+  Visual v;
+  v.id = id;
+  g_vis.push_back(v);
+  return g_vis.back();
+}
 
 struct Ev {
   int type;                        // 0 down, 1 motion, 2 up
@@ -278,14 +303,15 @@ void finger_down(SDL_FingerID id, float x, float y) {
   } else if (w.kind == kStick) {
     h.stick = true;
     h.camera = w.action == kCamera;
-    if (real->stick_mode == 1) {           // floating: the stick starts where the thumb landed
-      h.ox = x;
-      h.oy = y;
-    } else {                                // fixed: the drawn circle is the centre
-      const Widget e = effective(w);
-      h.ox = e.x;
-      h.oy = e.y;
-    }
+    // Measured from where the thumb landed, in both modes: a fixed stick whose axis started at its centre would jump to
+    // a deflection the moment a thumb landed off-centre. What the mode changes is only where the base is drawn - see
+    // draw_sticks() - so "fixed" means the ring stays put and "floating" means it appears under the thumb.
+    h.ox = x;
+    h.oy = y;
+    Visual& v = visual_for(w.id);
+    v.appear = real->stick_mode == 1 ? 0.0f : 1.0f;
+    v.kx = v.ky = 0.0f;      // the knob starts under the thumb, not wherever the last touch left it
+    buzz(0.25f);
   } else if (w.kind == kMenu) {
     g_menu_press = true;
     buzz(0.5f);
@@ -334,23 +360,67 @@ ImU32 col_of(float alpha, int pressed, float r, float g, float b) {
   return IM_COL32((int)(r * 255), (int)(g * 255), (int)(b * 255), (int)(a * 255));
 }
 
-void draw_widget(ImDrawList* dl, const Widget& w, const Look& look, ImVec2 centre, float radius_px, bool pressed,
+// Advances everything the overlay animates. dt is real time; input is never delayed by this (see update_sticks).
+void animate_visuals(float dt) {
+  const Layout* l = active_const();
+  if (!l) return;
+  for (const auto& w : l->widgets) {
+    Visual& v = visual_for(w.id);
+    v.seen = true;
+    bool held_now = false;
+    float tx = 0, ty = 0;
+    for (const auto& h : g_held) {
+      if (h.widget != w.id) continue;
+      held_now = true;
+      if (!h.stick) continue;
+      const Widget e = effective(w);
+      const float r = std::max(0.02f, e.r);
+      tx = (h.fx - h.ox) / r;
+      ty = (h.fy - h.oy) / r;
+      // the knob stays inside the ring even when the thumb is past it
+      const float len = std::sqrt(tx * tx + ty * ty);
+      if (len > 1.0f) {
+        tx /= len;
+        ty /= len;
+      }
+    }
+    // A stick follows the thumb quickly (a trail, not a delay) and springs back a little slower, which is what reads
+    // as "alive"; a released button pops back in about a tenth of a second.
+    const float tau = w.kind == kStick ? (held_now ? 0.035f : 0.085f) : (held_now ? 0.045f : 0.075f);
+    const float k = 1.0f - std::exp(-dt / tau);
+    v.kx += (tx - v.kx) * k;
+    v.ky += (ty - v.ky) * k;
+    v.press += ((held_now ? 1.0f : 0.0f) - v.press) * k;
+    if (!held_now && std::fabs(v.kx) < 0.002f) v.kx = 0;
+    if (!held_now && std::fabs(v.ky) < 0.002f) v.ky = 0;
+    if (w.kind == kStick) v.appear = std::min(1.0f, v.appear + dt / 0.09f);
+  }
+  // visuals of widgets that are gone (removed in the editor) do not need to be kept
+  g_vis.erase(std::remove_if(g_vis.begin(), g_vis.end(), [](const Visual& v) { return !v.seen; }), g_vis.end());
+  for (auto& v : g_vis) v.seen = false;
+}
+
+void draw_widget(ImDrawList* dl, const Widget& w, const Look& look, ImVec2 centre, float radius_px, float pressed,
                  bool selected, bool editing) {
   const int segs = radius_px > 40 ? 48 : 24;
   const float t = std::max(1.5f, look.unit * 2.0f);
+  // a press is a small, quick change of size, fill and brightness - under a thumb, so it has to be seen at the edge of
+  // the fingertip, and it has to be smooth (pressed is animated, never just 0 or 1)
+  radius_px *= 1.0f - 0.06f * pressed;
+  const float bright = 0.85f + 0.15f * pressed;
   // the body: a translucent disc so the picture stays visible under the thumb
   if (w.style == 2) {   // pill (long horizontal): the shoulders and jump buttons
     const ImVec2 a(centre.x - radius_px * 1.6f, centre.y - radius_px * 0.62f);
     const ImVec2 b(centre.x + radius_px * 1.6f, centre.y + radius_px * 0.62f);
-    dl->AddRectFilled(a, b, col_of(w.alpha * (pressed ? 0.55f : 0.32f), pressed, 0.10f, 0.12f, 0.16f), radius_px * 0.62f);
-    dl->AddRect(a, b, col_of(w.alpha, pressed, 0.95f, 0.95f, 1.0f), radius_px * 0.62f, 0, t);
+    dl->AddRectFilled(a, b, col_of(w.alpha * (0.32f + 0.26f * pressed), 0, 0.10f, 0.12f, 0.16f), radius_px * 0.62f);
+    dl->AddRect(a, b, col_of(w.alpha * bright, 0, 0.95f, 0.95f, 1.0f), radius_px * 0.62f, 0, t);
   } else {
-    dl->AddCircleFilled(centre, radius_px, col_of(w.alpha * (pressed ? 0.55f : 0.30f), pressed, 0.10f, 0.12f, 0.16f), segs);
-    dl->AddCircle(centre, radius_px, col_of(w.alpha, pressed, 0.95f, 0.95f, 1.0f), segs, t);
+    dl->AddCircleFilled(centre, radius_px, col_of(w.alpha * (0.30f + 0.28f * pressed), 0, 0.10f, 0.12f, 0.16f), segs);
+    dl->AddCircle(centre, radius_px, col_of(w.alpha * bright, 0, 0.95f, 0.95f, 1.0f), segs, t);
     if (w.style == 1)   // diamond: a triangle pair over the disc, so the shapes are told apart by touch
       dl->AddQuad(ImVec2(centre.x, centre.y - radius_px), ImVec2(centre.x + radius_px, centre.y),
                   ImVec2(centre.x, centre.y + radius_px), ImVec2(centre.x - radius_px, centre.y),
-                  col_of(w.alpha * 0.5f, pressed, 0.95f, 0.95f, 1.0f), t);
+                  col_of(w.alpha * (0.5f + 0.3f * pressed), 0, 0.95f, 0.95f, 1.0f), t);
   }
   if (selected && editing) {
     dl->AddCircle(centre, radius_px + look.unit * 4, IM_COL32(90, 200, 255, 230), segs, look.unit * 2.5f);
@@ -367,23 +437,72 @@ void draw_widget(ImDrawList* dl, const Widget& w, const Look& look, ImVec2 centr
     if (std::strlen(text) > 2) size = std::min(size, radius_px * 1.4f);
     const ImVec2 measured = look.font->CalcTextSizeA(size, FLT_MAX, 0, text);
     dl->AddText(look.font, size, ImVec2(centre.x - measured.x * 0.5f, centre.y - measured.y * 0.5f),
-                col_of(std::min(1.0f, w.alpha + 0.35f), pressed, 1.0f, 1.0f, 1.0f), text);
+                col_of(std::min(1.0f, w.alpha * bright + 0.18f * pressed), 0, 1.0f, 1.0f, 1.0f), text);
   }
 }
 
-// The game's touch pad inside the frame (settings::draw).
-void draw_sticks(ImDrawList* dl, const Layout& l, const Look& look, ImVec2 screen) {
+// One stick: the ring (where it lives), its deadzone, and the knob. The knob is what shows the input, so it is drawn
+// from the point the thumb landed on - in "fixed" mode the ring does not move, but the knob must still be under the
+// thumb, otherwise the picture lies about where the input comes from.
+void draw_stick(ImDrawList* dl, const Widget& w, const Look& look, ImVec2 ring, ImVec2 base, float r, const Visual& v,
+                bool active, int deadzone) {
+  const int segs = r > 40 ? 48 : 28;
+  const float t = std::max(1.5f, look.unit * 2.0f);
+  const float a = w.alpha * (active ? 1.0f : 0.8f);
+  dl->AddCircleFilled(ring, r, col_of(a * 0.22f, active ? 1 : 0, 0.09f, 0.11f, 0.15f), segs);
+  dl->AddCircle(ring, r, col_of(a * (active ? 0.95f : 0.7f), 0, 0.90f, 0.93f, 1.0f), segs, t);
+  if (deadzone > 0) {   // the part of the travel that does nothing: a thumb rolling a stick should see where it starts
+    const float dz = std::clamp(deadzone, 0, 60) / 100.0f * r;
+    if (dz > 2.0f) dl->AddCircle(ring, dz, col_of(a * 0.45f, 0, 0.90f, 0.93f, 1.0f), segs, t * 0.7f);
+  }
+  const float knob = std::max(6.0f, r * 0.40f);
+  const float travel = std::max(1.0f, r - knob);
+  ImVec2 kc(base.x + v.kx * travel, base.y + v.ky * travel);
+  // never let the knob leave the ring (a fixed stick's base can be off the centre)
+  const float ox = kc.x - ring.x, oy = kc.y - ring.y, ol = std::sqrt(ox * ox + oy * oy);
+  if (ol > travel) kc = ImVec2(ring.x + ox / ol * travel, ring.y + oy / ol * travel);
+  dl->AddCircleFilled(ImVec2(kc.x, kc.y + look.unit * 2.0f), knob, IM_COL32(0, 0, 0, 90), segs);
+  dl->AddCircleFilled(kc, knob, col_of(std::min(1.0f, a + 0.25f), active ? 1 : 0, 0.85f, 0.89f, 1.0f), segs);
+  dl->AddCircle(kc, knob, col_of(std::min(1.0f, a + 0.4f), active ? 1 : 0, 1.0f, 1.0f, 1.0f), segs, t);
+}
+
+// Every stick of the layout, under the buttons so a button wins a tap where they overlap.
+void draw_sticks(ImDrawList* dl, const Layout& l, const Look& look, ImVec2 screen, bool editing) {
   for (const auto& w : l.widgets) {
     if (w.kind != kStick || !w.on) continue;
+    const Visual v = visual_for(w.id);
+    const bool floating = l.stick_mode == 1;
     const float r = w.r * std::min(screen.x, screen.y);
-    ImVec2 centre(w.x * screen.x, w.y * screen.y);
-    // a held floating stick is drawn where the thumb is
+    const ImVec2 home(w.x * screen.x, w.y * screen.y);
+    ImVec2 ring = home, base = home;
+    bool active = false;
     for (const auto& h : g_held) {
       if (h.widget != w.id || !h.stick) continue;
-      centre = ImVec2(h.ox * screen.x, h.oy * screen.y);
+      active = true;
+      base = ImVec2(h.ox * screen.x, h.oy * screen.y);
+      if (floating) ring = base;
     }
-    dl->AddCircle(centre, r, col_of(w.alpha, 0, 0.85f, 0.88f, 1.0f), 40, std::max(1.5f, look.unit * 2.0f));
-    dl->AddCircleFilled(centre, r * 0.34f, col_of(w.alpha * 0.9f, 0, 0.75f, 0.80f, 0.95f), 24);
+    if (!active && editing) {   // the editor shows every control as it is, wherever the layout puts it
+      draw_stick(dl, w, look, home, home, r, v, false, l.deadzone);
+      if (w.id == g_selected) {
+        const float t = std::max(2.0f, look.unit * 3.0f);
+        dl->AddCircle(home, r + t, IM_COL32(79, 142, 247, 235), 40, t);
+      }
+      continue;
+    }
+    if (!active) {
+      // untouched, floating: a small mark where to put the thumb rather than a full stick that is not there
+      const float t = std::max(1.5f, look.unit * 2.0f);
+      if (floating) {
+        dl->AddCircle(home, r, col_of(w.alpha * 0.30f, 0, 0.90f, 0.93f, 1.0f), 28, t);
+        dl->AddCircleFilled(home, std::max(4.0f, r * 0.12f), col_of(w.alpha * 0.30f, 0, 0.90f, 0.93f, 1.0f), 16);
+        continue;
+      }
+    }
+    const float grow = (floating && active) ? (0.90f + 0.10f * v.appear) : 1.0f;   // settles in over ~90 ms
+    Widget shown = w;
+    if (floating) shown.alpha = w.alpha * v.appear;
+    draw_stick(dl, shown, look, ring, base, r * grow, v, active, l.deadzone);
   }
 }
 
@@ -400,21 +519,25 @@ void draw_layer(bool editing) {
   look.unit = std::max(0.75f, screen.y / 800.0f);
   const float short_px = std::min(screen.x, screen.y);
 
-  // the picture as it is drawn (the global scale / mirroring applied)
-  for (const auto& w0 : l->widgets) {
-    const Widget w = effective(w0);
-    if (!w.on) continue;
-    const ImVec2 centre(w.x * screen.x, w.y * screen.y);
-    const float r = w.r * short_px;
-    bool pressed = false;
-    for (const auto& h : g_held)
-      if (h.widget == w0.id && !h.stick) pressed = true;
-    if (w.kind == kStick) continue;   // sticks are drawn under the buttons, with their knob
-    draw_widget(dl, w, look, centre, r, pressed, w0.id == g_selected, editing);
-  }
+  // animate what is drawn (input already moved; this is the picture catching up)
+  const uint64_t now = sys_time_ns();
+  const float dt = g_vis_ns ? std::clamp((float)((now - g_vis_ns) * 1e-9), 0.001f, 0.1f) : 0.016f;
+  g_vis_ns = now;
+  animate_visuals(dt);
+
+  // sticks first: they are large, and a button drawn over one has to win a tap where the two overlap
   Layout eff = *l;
   for (auto& w : eff.widgets) w = effective(w);
-  draw_sticks(dl, eff, look, screen);
+  draw_sticks(dl, eff, look, screen, editing);
+
+  // then the buttons, with the global scale / mirroring applied
+  for (const auto& w0 : l->widgets) {
+    const Widget w = effective(w0);
+    if (!w.on || w.kind == kStick) continue;
+    const ImVec2 centre(w.x * screen.x, w.y * screen.y);
+    const float r = w.r * short_px;
+    draw_widget(dl, w, look, centre, r, visual_for(w0.id).press, w0.id == g_selected, editing);
+  }
 
   if (!g_toast.empty() && sys_time_ns() < g_toast_until) {
     const ImVec2 m = ImGui::CalcTextSize(g_toast.c_str());

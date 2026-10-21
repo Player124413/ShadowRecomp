@@ -11,6 +11,13 @@
   texture actually uses its alpha channel).
 - The APK can be built on GitHub Actions from a link you paste when you start the run - an ISO/GCM image, an archive
   holding `generated/` or a disc folder, or `main.dol` alone. No secret, no local NDK.
+- Immersive full screen in game: the status bar (the clock) and the three navigation buttons - back, home, recent -
+  are hidden while you play, and a swipe from an edge brings them back for a moment. They used to sit on top of the
+  picture, and the navigation bar took the taps meant for the controls at the bottom of the screen.
+- Touch sticks that behave like the ports: the ring stays where the layout drew it (no jump to your thumb), the axis is
+  measured from the point the thumb landed so a touch never starts at a deflection, the knob follows the thumb with a
+  short trail and springs back to the centre, the deadzone is drawn, and a button press is animated. Floating sticks
+  (the ring under the thumb) are still a choice in the editor, and now fade in instead of teleporting.
 - The Android build is built and packaged by GitHub Actions on every push (`.github/workflows/android-apk.yml`): the
   disc-free tests, a full arm64 compile of the native port, and an installable launcher-only APK. Set the
   `SHADOW_GEN_URL` secret to your own `generated/` tarball and the same job builds the real APK.

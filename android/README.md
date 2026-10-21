@@ -142,7 +142,7 @@ scale=100
 opacity=100
 hide_with_gamepad=1
 [classic]
-stick_mode=1          # 0 fixed, 1 floating (it appears where the thumb lands)
+stick_mode=0          # 0 fixed (the ring stays where it is drawn), 1 floating (under the thumb)
 deadzone=15
 haptics=1
 w=stick,0,0.1500,0.7200,0.1250,0.450,0,1     # kind,action,x,y,radius,opacity,style,visible
@@ -150,7 +150,14 @@ w=button,0,0.8850,0.7350,0.0560,0.550,0,1
 ```
 
 `x`/`y` are 0..1 of the screen, the radius is of the screen's short side, alpha 0..1, style 0 round / 1 diamond /
-2 pill; kinds are `button`, `stick`, `menu`, `edit`. The file is plain text: hand-editing and copying between phones
+2 pill; kinds are `button`, `stick`, `menu`, `edit`.
+
+The sticks are measured from the point the thumb lands on, so a touch never starts at a deflection, and the ring only
+moves if you choose a floating stick. The knob follows the thumb with a short trail and springs back to the centre, the
+deadzone is drawn, and a press changes a button's size and fill - the overlay animates, the input never waits for the
+animation. The game itself runs immersive: the status bar and the navigation buttons are hidden while you play (swipe
+from an edge to bring them back for a moment), so nothing sits on top of the picture or takes a tap from a control.
+`version=1` files written by an earlier build are read as fixed sticks. The file is plain text: hand-editing and copying between phones
 both work. The parser and its test are platform-free (`tools/android/`):
 
 ```sh

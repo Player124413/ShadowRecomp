@@ -119,7 +119,7 @@ Widget* hit(Layout& layout, float x, float y, float aspect) {
 
 File defaults() {
   File f;
-  f.version = 1;
+  f.version = 2;   // 2: fixed sticks by default (see load() for what changed)
   f.active = "classic";
 
   // Classic: what a GameCube pad maps to on glass, in landscape. The left thumb moves, the right thumb turns the
@@ -127,7 +127,7 @@ File defaults() {
   Layout c;
   c.name = "classic";
   c.builtin = true;
-  c.stick_mode = 1;
+  c.stick_mode = 0;   // fixed: the ring a player sees is the ring the game reads, so it never moves under the thumb
   c.widgets = {
       stick(kMove, 0.15f, 0.72f, 0.125f),
       stick(kCamera, 0.84f, 0.44f, 0.085f),
@@ -151,7 +151,7 @@ File defaults() {
   // Minimal: just what a stage needs.
   Layout m;
   m.name = "minimal";
-  m.stick_mode = 1;
+  m.stick_mode = 0;
   m.widgets = {
       stick(kMove, 0.14f, 0.74f, 0.115f),
       stick(kCamera, 0.85f, 0.5f, 0.08f),
@@ -259,6 +259,14 @@ File parse(const std::string& text) {
       Widget w;
       if (parse_widget(val, w)) cur->widgets.push_back(w);
     }
+  }
+  // Version 1 defaulted every preset to a floating stick. That is the control the first Android players called broken:
+  // the ring jumped to wherever the thumb landed. The input fix makes it usable, but a stick that stays where it was
+  // drawn is what a pad is expected to look like, so a file from before version 2 starts fixed; the editor's "Stick"
+  // switch still offers floating (and now animates the ring in where the thumb landed instead of teleporting it).
+  if (f.version < 2) {
+    for (auto& l : f.layouts) l.stick_mode = 0;
+    f.version = 2;
   }
   // a file with no usable layout (missing, all broken, or only sections without widgets) is the built-in set
   bool usable = false;

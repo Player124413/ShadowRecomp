@@ -4,7 +4,7 @@
 //
 // The file is plain text (touch_layouts.ini, next to the settings):
 //
-//   version=1
+//   version=2
 //   active=classic            which layout the game uses (a name from this file)
 //   scale=100                 every widget's size, %
 //   opacity=100               every widget's opacity, %
@@ -12,7 +12,7 @@
 //   left_handed=0             mirror the whole picture left <-> right
 //   hide_with_gamepad=1       hide the overlay while a physical controller is connected
 //   [classic]                 one layout; the section name is its name (a saved one may be renamed)
-//   stick_mode=1              0 fixed stick, 1 floating (it appears where the thumb lands)
+//   stick_mode=0              0 fixed stick (the ring stays where it is drawn), 1 floating (under the thumb)
 //   deadzone=15               % of the stick's travel that does nothing
 //   haptics=1                 a short vibration on button presses
 //   w=button,256,0.880,0.780,0.075,0.55,0,1
@@ -45,14 +45,14 @@ struct Widget {
 struct Layout {
   std::string name;
   bool builtin = false;
-  int stick_mode = 1;      // 0 fixed, 1 floating
+  int stick_mode = 0;      // 0 fixed, 1 floating; a version 1 file is read as fixed (load() in touch_layout.cpp)
   int deadzone = 15;       // %
   bool haptics = true;
   std::vector<Widget> widgets;
 };
 
 struct File {
-  int version = 1;
+  int version = 2;   // written by dump(); a version 1 file is migrated in load()
   std::string active;
   int scale = 100;         // %
   int opacity = 100;       // %

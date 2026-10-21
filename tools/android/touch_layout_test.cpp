@@ -124,6 +124,34 @@ int main() {
     CHECK(my->widgets[1].action == A);
   }
 
+  // ---- the version 1 -> 2 migration -----------------------------------------------------------------------------
+  // Version 1 wrote the presets with a floating stick, which is the control the first players called broken (the ring
+  // jumped to the thumb). A file from then starts fixed; the editor's switch still offers floating.
+  const char* v1 =
+      "version=1\n"
+      "active=classic\n"
+      "[classic]\n"
+      "stick_mode=1\n"
+      "deadzone=15\n"
+      "w=stick,0,0.2,0.8,0.12,0.5,0,1\n";
+  File old1 = parse(v1);
+  CHECK(old1.version == 2);
+  const Layout* oc = find(old1, "classic");
+  CHECK(oc != nullptr);
+  if (oc) CHECK(oc->stick_mode == 0);
+  // ... and a file that says version 2 keeps what it says (the player's own choice, either way)
+  const char* v2 = "version=2\nactive=classic\n[classic]\nstick_mode=1\nw=stick,0,0.2,0.8,0.12,0.5,0,1\n";
+  File new2 = parse(v2);
+  const Layout* nc = find(new2, "classic");
+  CHECK(nc != nullptr);
+  if (nc) CHECK(nc->stick_mode == 1);
+  // the built-in presets themselves are fixed now
+  CHECK(find(defaults(), "classic")->stick_mode == 0);
+  CHECK(find(defaults(), "minimal")->stick_mode == 0);
+  const Layout* lh2 = find(defaults(), "left_handed");
+  CHECK(lh2 != nullptr);
+  if (lh2) CHECK(lh2->stick_mode == 0);
+
   // ---- damage tolerance ------------------------------------------------------------------------------------------
   CHECK(parse("").layouts.size() == 3);                    // nothing: the built-ins
   CHECK(parse("active=nope\n").layouts.size() == 3);
