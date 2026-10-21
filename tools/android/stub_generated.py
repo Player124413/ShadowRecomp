@@ -86,6 +86,7 @@ def definitions(guest: list[str], hle: list[str], defined: set[str]) -> str:
             "#endif",
             "",
             "#include \"funcs.h\"",
+            "#include \"rt_internal.h\"     // GuestFunc / MultiFunc: the two lookup tables gen.py writes",
             "",
             "// Weak: a real definition elsewhere in the runtime (several hle_* overrides are written with a macro, which is",
             "// why they are not easy to spot here) then wins over the empty stand-in instead of colliding with it.",
@@ -98,7 +99,13 @@ def definitions(guest: list[str], hle: list[str], defined: set[str]) -> str:
     body += ["SHADOW_STUB_WEAK void %s(Cpu&) {}" % n for n in guest]
     # hle_* overrides that the runtime does not define itself. The weak attribute covers the ones this filter misses.
     body += ["SHADOW_STUB_WEAK void %s(Cpu&) {}" % n for n in hle if n not in defined]
-    body.append("")
+    body += ["",
+             "// The lookup tables gen.py writes next to the functions. Empty, with the terminator rt_core.cpp expects, so",
+             "// that a lookup finds nothing instead of walking off the end of a table that is not there.",
+             "const GuestFunc g_functab[] = {{0u, 0u, nullptr, nullptr}};",
+             "const unsigned g_functab_count = 0u;",
+             "const MultiFunc g_multi[] = {{0u, 0u, nullptr}};",
+             ""]
     return "\n".join(body)
 
 

@@ -171,6 +171,22 @@ if(ANDROID)
       absl::btree absl::flat_hash_map Tracy::TracyClient dawn::webgpu_dawn sqlite3 PNG::PNG
       log android EGL GLESv3)
 
+  # Aurora's Android surface lock (third_party/aurora/lib/window.cpp, SurfaceLock) takes SDL's activity mutex around
+  # surface configuration and present. SDL3 declares Android_LockActivityMutex without SDL_DECLSPEC, and SDL3 builds with
+  # -fvisibility=hidden, so the function never reaches libSDL3.so's dynamic symbol table and the app fails to link with
+  # "undefined symbol: Android_LockActivityMutex". Building SDL's Android glue with default visibility is the smallest
+  # way to give Aurora what it asks for; nothing else about SDL changes.
+  if(TARGET SDL3-shared)
+    get_target_property(_shadow_sdl_source_dir SDL3-shared SOURCE_DIR)
+    set(_shadow_sdl_android "${_shadow_sdl_source_dir}/src/core/android/SDL_android.c")
+    if(EXISTS "${_shadow_sdl_android}")
+      set_source_files_properties("${_shadow_sdl_android}" PROPERTIES COMPILE_OPTIONS "-fvisibility=default")
+      message(STATUS "shadow: exporting SDL's Android activity mutex for Aurora's surface lock")
+    else()
+      message(WARNING "shadow: ${_shadow_sdl_android} not found - Aurora's surface lock may fail to link")
+    endif()
+  endif()
+
   # Gradle packages whatever is in jniLibs: both our libmain.so and libSDL3.so have to land there, or the app starts and
   # immediately dies in System.loadLibrary.
   set(_shadow_jnilibs ${SHADOW_ANDROID_DIR}/app/src/main/jniLibs/${CMAKE_ANDROID_ARCH_ABI})

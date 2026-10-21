@@ -39,6 +39,13 @@ void controls_changed();   // #169 (end of this file)
 namespace settings {
 Values g;
 
+#ifdef __ANDROID__
+// Where these fonts come from on a phone. On Windows they are set up in runtime/launcher.cpp, which is the settings
+// window's own code and is not part of the Android build (there the launcher is Java). The ImGui overlay the phone does
+// have - the in-game menu and the touch editor - is drawn with the in-game menu's fonts, so that is what this is.
+void init_fonts() { game_menu::init_fonts(); }
+#endif
+
 static std::string ini_path() {
   char exe[MAX_PATH];
   GetModuleFileNameA(nullptr, exe, MAX_PATH);
