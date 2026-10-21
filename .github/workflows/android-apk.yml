@@ -124,6 +124,9 @@ jobs:
 
       - name: Configure for arm64
         run: |
+          # `set +e` and PIPESTATUS: a configure failure must not be swallowed by tee, and it must be reported as one
+          # annotation with the reason (see below) rather than as a bare exit code.
+          set +e
           cmake -S . -B build-android -G Ninja \
             -DCMAKE_TOOLCHAIN_FILE="$ANDROID_HOME/ndk/$NDK_VERSION/build/cmake/android.toolchain.cmake" \
             -DANDROID_ABI=arm64-v8a \
@@ -131,6 +134,8 @@ jobs:
             -DANDROID_STL=c++_static \
             -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_EXPORT_COMPILE_COMMANDS=ON 2>&1 | tee configure.log
+          cmake_status=${PIPESTATUS[0]}
+          echo "cmake exit: $cmake_status"
           # Which of the third-party dependencies were found on the machine and which had to be fetched: put the
           # interesting lines in the annotations, because the configure log itself is not readable everywhere.
           # sqlite3 goes first and as a warning, because it has its own, separate annotation budget and it is the one
@@ -141,6 +146,11 @@ jobs:
           grep -E "aurora: (Using|Fetching)" configure.log | grep -v sqlite | sort -u | head -6 | while IFS= read -r line; do
             printf '::notice ::%s\n' "$(printf '%s' "$line" | sed 's/^-- //' | head -c 300)"
           done
+          if [ "$cmake_status" -ne 0 ] || [ ! -f build-android/compile_commands.json ]; then
+            python3 tools/android/ci_errors.py configure.log --configure
+            echo "::error title=cmake ::no compile_commands.json: the configure step did not get far enough"
+            exit 1
+          fi
           # Every translation unit the build knows about, as a build target, so we can compile them all and skip the
           # link: linking needs the recompiled game functions, which only the disc can produce.
           python3 - <<'PY' > objects.txt
@@ -185,8 +195,10 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: native-build-log
-          path: build.log
-          if-no-files-found: warn
+          path: |
+            build.log
+            configure.log
+          if-no-files-found: ignore
           retention-days: 14
 
       - name: Say what was proven

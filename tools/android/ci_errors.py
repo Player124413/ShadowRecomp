@@ -15,6 +15,7 @@ GitHub shows at most ten error annotations per step, so at most ten are emitted;
 text with --report for the job summary.
 
 Usage: ci_errors.py build.log [--limit N] [--report]
+       ci_errors.py configure.log --configure
 Without --report it prints the ::error:: workflow commands (the annotations); with it, the same findings as readable
 text for the job summary instead.
 """
@@ -129,6 +130,22 @@ def message(block: list[str], index: int, command: str) -> str:
     return text if len(text) <= MAX_MESSAGE else text[:MAX_MESSAGE] + "\n... (truncated)"
 
 
+def configure_report(lines: list[str]) -> str:
+    """The reason a cmake run stopped: its "CMake Error" block(s), then the last lines before it gave up."""
+    starts = [index for index, line in enumerate(lines)
+              if re.search(r"CMake Error|^-- Configuring incomplete|Error at .*CMake", line)]
+    body: list[str] = []
+    if starts:
+        first = starts[0]
+        body.extend(line.rstrip() for line in lines[first:first + 60])
+    else:
+        body.extend(line.rstrip() for line in lines[-30:])
+    text = "\n".join(body)
+    text = re.sub(r"\n{3,}", "\n\n", text)
+    text = text if len(text) <= MAX_MESSAGE else text[:MAX_MESSAGE] + "\n... (truncated)"
+    return text
+
+
 def main(argv: list[str]) -> int:
     if len(argv) < 2:
         print(__doc__.strip().splitlines()[0])
@@ -139,12 +156,17 @@ def main(argv: list[str]) -> int:
     if "--limit" in argv:
         limit = int(argv[argv.index("--limit") + 1])
     report_only = "--report" in argv
+    configure_mode = "--configure" in argv
     if not os.path.exists(path):
         print(f"::warning ::{escape(path)} was never written, so the compiler produced no output to report")
         return 0
 
     with open(path, encoding="utf-8", errors="replace") as handle:
         lines = handle.readlines()
+
+    if configure_mode:
+        print(f"::error title=cmake ::{escape(configure_report(lines))}")
+        return 0
 
     seen: set[str] = set()
     report: list[str] = []
