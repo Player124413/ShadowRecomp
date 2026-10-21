@@ -37,6 +37,9 @@ HLE_RE = re.compile(r"\bhle_[A-Za-z0-9_]+\b")
 # "void hle_X(Cpu& c, uint32_t target)" - an override that takes more than the CPU. Those are declared by whoever needs
 # them; inventing a prototype for them here would clash with the definition.
 HLE_DEF = re.compile(r"\bvoid\s+(hle_[A-Za-z0-9_]+)\s*\(([^)]*)\)")
+# Some overrides are written with a helper macro, e.g. WS_RES_HOOK(hle_ResByName34, f_80014640, "name", 0x34), which
+# defines that function. Any ALL_CAPS(...) invocation naming an hle_ function is treated as a definition.
+HLE_MACRO_DEF = re.compile(r"^[ \t]*[A-Z][A-Z0-9_]*\s*\(\s*(hle_[A-Za-z0-9_]+)", re.MULTILINE)
 
 
 def sources():
@@ -60,6 +63,7 @@ def scan() -> tuple[list[str], list[str], set[str]]:
     for _, text in texts:
         guest.update(CALL_RE.findall(text))
         hle.update(HLE_RE.findall(text))
+        defined.update(HLE_MACRO_DEF.findall(text))
         for name, params in HLE_DEF.findall(text):
             defined.add(name)
             # count the parameters: a "(Cpu& c, uint32_t target)" definition cannot be declared as "(Cpu&)"
@@ -82,10 +86,18 @@ def definitions(guest: list[str], hle: list[str], defined: set[str]) -> str:
             "#endif",
             "",
             "#include \"funcs.h\"",
+            "",
+            "// Weak: a real definition elsewhere in the runtime (several hle_* overrides are written with a macro, which is",
+            "// why they are not easy to spot here) then wins over the empty stand-in instead of colliding with it.",
+            "#if defined(__GNUC__) || defined(__clang__)",
+            "#define SHADOW_STUB_WEAK __attribute__((weak))",
+            "#else",
+            "#define SHADOW_STUB_WEAK",
+            "#endif",
             ""]
-    body += ["void %s(Cpu&) {}" % n for n in guest]
-    # hle_* overrides that the runtime does not define itself (the ones it does would be duplicate symbols).
-    body += ["void %s(Cpu&) {}" % n for n in hle if n not in defined]
+    body += ["SHADOW_STUB_WEAK void %s(Cpu&) {}" % n for n in guest]
+    # hle_* overrides that the runtime does not define itself. The weak attribute covers the ones this filter misses.
+    body += ["SHADOW_STUB_WEAK void %s(Cpu&) {}" % n for n in hle if n not in defined]
     body.append("")
     return "\n".join(body)
 
