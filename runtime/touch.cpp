@@ -69,9 +69,16 @@ bool g_gamepad_seen = false;       // hide_with_gamepad: a real pad was connecte
 // --------------------------------------------------------------------------------------------------------------------
 // the file
 
+void reload();   // defined below: reads the file (the editor's Cancel uses it)
+
 void ensure_loaded() {
   if (g_loaded) return;
   g_loaded = true;
+  reload();
+}
+
+// Reads the file (or falls back to the presets). The editor's Cancel calls this to forget what was changed.
+void reload() {
   g_path = plat::data_path("touch_layouts.ini");
   if (FILE* f = plat::open(g_path.c_str(), "rb")) {
     std::string text;
@@ -802,7 +809,8 @@ void close_editor(bool save_changes) {
     save();
     toast("Touch layout saved");
   } else if (!save_changes && g_dirty) {
-    load();
+    reload();   // throws the edits away: the file on disk is the truth
+    toast("Changes discarded");
   }
   g_dirty = false;
 }
