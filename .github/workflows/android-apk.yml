@@ -69,7 +69,7 @@ jobs:
           java-version: '17'
 
       - name: Python tools parse
-        run: python3 -m py_compile tools/gen.py tools/dol.py tools/lift.py tools/android/stub_generated.py
+        run: python3 -m py_compile tools/gen.py tools/dol.py tools/lift.py tools/android/stub_generated.py tools/android/ci_errors.py
 
       - name: Java sources parse
         run: |
@@ -130,7 +130,12 @@ jobs:
             -DANDROID_PLATFORM=android-26 \
             -DANDROID_STL=c++_static \
             -DCMAKE_BUILD_TYPE=Release \
-            -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
+            -DCMAKE_EXPORT_COMPILE_COMMANDS=ON 2>&1 | tee configure.log
+          # Which of the third-party dependencies were found on the machine and which had to be fetched: put the
+          # interesting lines in the annotations, because the configure log itself is not readable everywhere.
+          grep -E "aurora: (Using|Fetching)" configure.log | sort -u | head -8 | while IFS= read -r line; do
+            printf '::notice ::%s\n' "$(printf '%s' "$line" | sed 's/^-- //' | head -c 300)"
+          done
           # Every translation unit the build knows about, as a build target, so we can compile them all and skip the
           # link: linking needs the recompiled game functions, which only the disc can produce.
           python3 - <<'PY' > objects.txt
@@ -155,15 +160,14 @@ jobs:
           status=$?
           echo "ninja exit: $status"
           # Surface the compiler's complaints where they can be read without downloading a log: the check run's
-          # annotations, and the job's own summary page.
-          grep -E "(error|Error):" build.log | head -40 | while IFS= read -r line; do
-            printf '::error ::%s\n' "$(printf '%s' "$line" | tr -d '\r' | head -c 800)"
-          done
+          # annotations (each one carries the include/instantiation chain and the failing command) and the summary.
+          python3 tools/android/ci_errors.py build.log
+          python3 tools/android/ci_errors.py build.log --report > ci_errors.txt
           {
             echo "### Native compile (arm64-v8a)"
             echo
             echo '```'
-            grep -E "(error|Error):" build.log | head -60 || echo "(no error: lines)"
+            head -c 120000 ci_errors.txt
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
           tail -40 build.log
