@@ -11,8 +11,8 @@ name: Android APK
 #                   WITHOUT the game code: tools/android/stub_generated.py stands in for generated/, and every object
 #                   file is built while the link is left out. This is the check that catches "it stopped building".
 #   apk           - the actual installable APK. The recompiled game code only exists on the machine of someone who owns
-#                   the disc, so with the SHADOW_GEN_URL secret (a .tar.gz of your generated/ folder) this builds the real
-#                   thing. Without it, it builds a *launcher-only* APK instead: the same Gradle/NDK/SDL3/CMake packaging
+#                   the disc, so with the SHADOW_GEN_URL secret pointing at a .tar.gz (of generated/, of a disc folder, or
+#                   of main.dol alone - tools/gen.py is run here for the last two) this builds the real thing. Without it, it builds a *launcher-only* APK instead: the same Gradle/NDK/SDL3/CMake packaging
 #                   path, with empty stand-ins in place of the game code (tools/android/stub_generated.py --definitions).
 #                   That one installs and shows the launcher but cannot play; it exists so the packaging itself is built
 #                   and tested on every push rather than on the one machine that owns a disc.
@@ -246,25 +246,49 @@ jobs:
         run: |
           if [ -n "$GEN_URL" ]; then
             echo "have=yes" >> "$GITHUB_OUTPUT"
-            echo "::notice::Building the real APK from the generated/ tarball in SHADOW_GEN_URL."
+            echo "::notice::Building the real APK from the tarball in SHADOW_GEN_URL (generated/, a disc folder, or main.dol)."
           else
             echo "have=no" >> "$GITHUB_OUTPUT"
             echo "::notice::No SHADOW_GEN_URL secret, so there is no game code to link: building a *launcher-only* APK "\
-                 "instead (it installs and shows the launcher, but cannot play). For the real one, run 'python tools/gen.py' "\
-                 "on a machine with your disc, tar up generated/, host the tarball and set SHADOW_GEN_URL - see android/README.md."
+                 "instead (it installs and shows the launcher, but cannot play). For the real one, put a .tar.gz of "\
+                 "generated/, of your disc folder, or of main.dol alone somewhere with a direct link and set SHADOW_GEN_URL "\
+                 "to it - see android/README.md."
           fi
 
-      - name: Fetch and unpack generated/
+      - name: Fetch the game code (or the disc it comes from)
         if: steps.gamecode.outputs.have == 'yes'
         env:
           GEN_URL: ${{ secrets.SHADOW_GEN_URL }}
         run: |
           set -euo pipefail
-          curl -fsSL --retry 3 -o /tmp/generated.tar.gz "$GEN_URL"
-          mkdir -p generated
-          tar -xzf /tmp/generated.tar.gz -C generated --strip-components=1 \
-            || tar -xzf /tmp/generated.tar.gz -C generated        # also accept a tarball without a top folder
-          test -f generated/files.cmake || { echo "generated/files.cmake missing from the tarball"; exit 1; }
+          curl -fsSL --retry 3 -o /tmp/gamecode.tar.gz "$GEN_URL"
+          rm -rf /tmp/gamecode && mkdir -p /tmp/gamecode
+          tar -xzf /tmp/gamecode.tar.gz -C /tmp/gamecode
+          # Three shapes are accepted, because recompiling needs nothing but the DOL and it is much smaller than the
+          # code it produces:
+          #   1. generated/files.cmake  - the recompiled code, ready to use;
+          #   2. sys/main.dol           - a disc folder (what Dolphin or tools/game_import produces);
+          #   3. main.dol               - the file on its own.
+          # In cases 2 and 3 tools/gen.py runs here, so nothing has to be generated on your machine.
+          gen_cmake=$(find /tmp/gamecode -maxdepth 5 -path '*/generated/files.cmake' | head -1 || true)
+          dol=$(find /tmp/gamecode -maxdepth 5 -name main.dol | head -1 || true)
+          if [ -n "$gen_cmake" ]; then
+            echo "tarball: recompiled code ($(dirname "$(dirname "$gen_cmake")"))"
+            mkdir -p generated && cp -a "$(dirname "$gen_cmake")/." generated/
+          elif [ -n "$dol" ]; then
+            echo "tarball: $dol - recompiling with tools/gen.py"
+            mkdir -p /tmp/disc/sys && cp "$dol" /tmp/disc/sys/main.dol
+            python3 -c "import hashlib,sys; h=hashlib.sha1(open('/tmp/disc/sys/main.dol','rb').read()).hexdigest(); \
+              print('main.dol sha1:', h); sys.exit(0 if h=='118ef49ebd45b371b6f514e0e1b6d1ba7cf12904' else 1)" \
+              || { echo "::error ::this main.dol is not the USA release (GUPE8P rev 0) - the game would not run"; exit 1; }
+            SHADOW_DISC=/tmp/disc python3 tools/gen.py
+          else
+            echo "::error ::the tarball has neither generated/files.cmake nor a main.dol"
+            find /tmp/gamecode -maxdepth 3 | head -50
+            exit 1
+          fi
+          test -f generated/files.cmake || { echo "::error ::no generated/files.cmake was produced"; exit 1; }
+          echo "translation units from the game: $(grep -c '\.cpp' generated/files.cmake) source files"
 
       - name: Stand-in generated/ (launcher-only APK)
         if: steps.gamecode.outputs.have == 'no'

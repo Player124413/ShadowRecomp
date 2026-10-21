@@ -77,20 +77,35 @@ long and wants about 10 GB — do it only if you need it.
 | --- | --- | --- |
 | `checks` | the disc-free tests (`tools/android/`): ETC2 encoder against an independent decoder, the touch layout, the Java sources | nothing |
 | `compile` | compiles **every** native file for `arm64-v8a` with the real NDK. `tools/android/stub_generated.py` writes a stand-in `generated/`, so nothing needs the disc; the link step is deliberately not attempted | nothing |
-| `apk` | the installable APK | the recompiled game code |
+| `apk` | the installable APK | the game code, or the `main.dol` it comes from |
 
-The APK job cannot invent the game: `generated/` is code from your own `main.dol`. To let it build, put that folder in
-a tarball once and point a repository secret at it:
+The APK job cannot invent the game: `generated/` is code from your own `main.dol`. There is a secret for that, and it
+takes a tarball in any of three shapes - the workflow works out which one it got:
+
+| What you upload | Size | What the job does |
+| --- | --- | --- |
+| `generated/` | ~200 MB | uses it as is (fastest) |
+| your disc folder (`sys/main.dol` + `files/`) | ~1.4 GB | runs `tools/gen.py` on it here |
+| `main.dol` alone | ~5 MB | runs `tools/gen.py` on it here - usually the easiest |
 
 ```sh
-tar -czf generated.tar.gz generated/                     # on the machine that ran tools/gen.py
-# upload it somewhere private (a release asset, a private gist, S3 with a signed URL...) and then:
+# main.dol on its own is enough and is the smallest thing to upload:
+tar -czf main.dol.tar.gz -C "<disc folder>/sys" main.dol
+
+# or, if you have already run tools/gen.py:
+tar -czf generated.tar.gz generated/
+# upload it somewhere with a direct link (a release asset of a private repo, a private gist, S3 with a signed URL...)
 #   Settings → Secrets and variables → Actions → New repository secret
 #   name: SHADOW_GEN_URL   value: <the URL>
 ```
 
-Without the secret the job says so and skips, and the other two still run — which is the point: they are the ones that
-tell you the port still builds. Keep it private: that tarball is the game's compiled code.
+`main.dol` is checked against the SHA-1 of the USA release (`118ef49e...`) before anything is built, so a PAL or
+Japanese dump fails loudly instead of producing an APK that crashes on the phone. Do not put the disc or `generated/`
+in the repository: `generated/` is the game's compiled code, and the secret exists so that it can stay out of git.
+
+Without the secret the job builds a **launcher-only** APK instead (`tools/android/stub_generated.py --definitions`):
+the same packaging path with empty stand-ins, so the Gradle/NDK/SDL3 side is still tested on every push. It installs and
+shows the launcher but cannot play.
 
 ## First run
 
