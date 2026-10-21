@@ -154,21 +154,26 @@ def configure_report(lines: list[str]) -> str:
 
 
 def keyword_report(lines: list[str]) -> str:
-    """The reason a Gradle/CMake/NDK build stopped, when it was not a plain compiler log."""
-    markers = [index for index, line in enumerate(lines)
-               if re.match(r"^(FAILURE: Build failed|\* What went wrong:|CMake Error|ninja: build stopped)", line.strip())]
-    body: list[str] = []
-    if markers:
-        first = markers[0]
-        body.extend(line.rstrip() for line in lines[first:first + 70])
-    errors = [line.rstrip() for line in lines if re.search(r"error:|Error:|error ", line)][-15:]
+    """The reason a Gradle/CMake/NDK build stopped, when it was not a plain compiler log.
+
+    Gradle prints the whole CMake/ninja transcript inside its "What went wrong" block - hundreds of `[12/670] Building
+    ...` progress lines, with the actual failure at the very end. So the progress lines are dropped and the tail, where
+    the error is, is kept.
+    """
+    progress = re.compile(r"^\s*\[\d+/\d+\] ")
+    body = [line.rstrip() for line in lines if not progress.match(line)]
+    # Keep the head of the failure (the task that failed) and above all the tail (what the compiler said).
+    tail = body[-45:]
+    head = body[:12]
+    errors = [line for line in body if re.search(r"(?:error|Error):|fatal error:|undefined symbol|cannot find", line)][-12:]
+    parts = list(head)
+    parts.append("...")
     if errors:
-        body.append("")
-        body.append("... error lines:")
-        body.extend(errors)
-    if not body:
-        body.extend(line.rstrip() for line in lines[-30:])
-    text = "\n".join(body)
+        parts.append("... error lines:")
+        parts.extend(errors)
+        parts.append("...")
+    parts.extend(tail)
+    text = "\n".join(parts)
     text = re.sub(r"\n{3,}", "\n\n", text)
     return text if len(text) <= MAX_MESSAGE else text[:MAX_MESSAGE] + "\n... (truncated)"
 
