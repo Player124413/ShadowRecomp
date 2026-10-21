@@ -1,5 +1,22 @@
 # Changelog
 
+## Unreleased
+
+**Android (new)**
+- A 64-bit Android port: one APK for arm64 phones, a launcher that imports your own disc image and picks a graphics
+  tier, and touch controls you edit on top of the running picture (drag, resize, opacity, rebind, presets, your own
+  layouts). Bluetooth gamepads work alongside the touch controls.
+- ETC2 textures on Android: textures the console stored block-compressed (CMPR) are re-encoded to ETC2 instead of being
+  uploaded as 32-bit RGBA8, four to eight times less texture memory and texture bandwidth (EAC alpha only when a
+  texture actually uses its alpha channel).
+- The Android build is built and packaged by GitHub Actions on every push (`.github/workflows/android-apk.yml`): the
+  disc-free tests, a full arm64 compile of the native port, and an installable launcher-only APK. Set the
+  `SHADOW_GEN_URL` secret to your own `generated/` tarball and the same job builds the real APK.
+
+**Fixes**
+- Build one APK without a disc: `SHADOW_STUB_GAME_CODE=1 android/build.sh` links empty stand-ins for the game code, so
+  the launcher and the packaging can be tried before `tools/gen.py` has ever run.
+
 ## v1.1 (2026-10-21)
 
 **New**
