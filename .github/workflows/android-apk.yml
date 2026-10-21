@@ -296,20 +296,35 @@ jobs:
           [ "$ok" = "1" ] || { echo "::error ::the Android SDK packages could not be installed"; exit 1; }
           echo "ANDROID_HOME=$ANDROID_HOME"
 
-      - name: Let Gradle use this machine's CMake
-        # The project needs CMake 3.28+ (FetchContent options, find_package GLOBAL). The SDK's CMake package is older than
-        # that, and what the runner already has is new enough - so point Gradle's CMake locator at it by hand.
+      - id: cmake
+        name: A CMake new enough for the project (3.28+)
+        # The SDK's CMake package is 3.22.1, and the project uses FetchContent options and find_package(GLOBAL) that need
+        # newer. Try the SDK's newer packages first; if none of them exist, install CMake from PyPI and point Gradle's
+        # cmake.dir at it.
         run: |
-          cmake --version | head -1
-          echo "cmake.dir=$(dirname "$(dirname "$(command -v cmake)")")" >> android/local.properties
-          cat android/local.properties
+          set -uo pipefail
+          sdkmanager="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-$HOME/android-sdk}}/cmdline-tools/latest/bin/sdkmanager"
+          for package in "cmake;3.31.6" "cmake;3.30.5" "cmake;3.28.3"; do
+            if "$sdkmanager" --install "$package" >/dev/null 2>&1; then
+              echo "using $package"
+              echo "version=${package#cmake;}" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            echo "$package is not available from the SDK"
+          done
+          echo "falling back to CMake from PyPI, selected with cmake.dir"
+          python3 -m pip install --quiet "cmake==3.31.6"
+          cmake_dir=$(python3 -c "import cmake, os; print(os.path.dirname(cmake.CMAKE_BIN_DIR))")
+          echo "cmake.dir=$cmake_dir" >> android/local.properties
+          echo "version=" >> "$GITHUB_OUTPUT"
+          "$cmake_dir/bin/cmake" --version | head -1
 
       - name: Build the APK
         env:
           # Keep Gradle and the Android build files in the workspace, and let the build use a .gradle-dist download.
           GRADLE_OPTS: -Dorg.gradle.daemon=false
           # The launcher-only build links the stand-in game code (see the job's comment at the top of the file).
-          SHADOW_GRADLE_ARGS: -Pshadow.cmake=${{ env.SDK_CMAKE }} -Pshadow.stubGameCode=${{ steps.gamecode.outputs.have == 'yes' && 'OFF' || 'ON' }}
+          SHADOW_GRADLE_ARGS: ${{ steps.cmake.outputs.version && format('-Pshadow.cmake={0}', steps.cmake.outputs.version) || '' }} -Pshadow.stubGameCode=${{ steps.gamecode.outputs.have == 'yes' && 'OFF' || 'ON' }}
         run: |
           set +e
           chmod +x android/build.sh

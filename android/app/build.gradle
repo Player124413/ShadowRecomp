@@ -67,9 +67,13 @@ android {
     externalNativeBuild {
         cmake {
             path file('../../CMakeLists.txt')
-            // Which CMake to use. 3.25.1 is what a current SDK installs; CI overrides it with -Pshadow.cmake=... because
-            // the SDK package that actually exists there is older.
-            version project.findProperty('shadow.cmake') ?: '3.25.1'
+            // Which CMake to use. The project needs 3.28 or newer, so a -Pshadow.cmake=<version> from the command line
+            // picks an SDK-installed one; without it, Gradle's default applies, and `cmake.dir` in local.properties
+            // points it at a CMake that was installed some other way (that is what CI and build.sh do when the SDK has
+            // nothing new enough).
+            if (project.hasProperty('shadow.cmake')) {
+                version project.findProperty('shadow.cmake')
+            }
         }
     }
 
