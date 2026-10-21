@@ -133,7 +133,12 @@ jobs:
             -DCMAKE_EXPORT_COMPILE_COMMANDS=ON 2>&1 | tee configure.log
           # Which of the third-party dependencies were found on the machine and which had to be fetched: put the
           # interesting lines in the annotations, because the configure log itself is not readable everywhere.
-          grep -E "(aurora|shadow): (Using|Fetching|sqlite3)" configure.log | sort -u | head -8 | while IFS= read -r line; do
+          # sqlite3 goes first and as a warning, because it has its own, separate annotation budget and it is the one
+          # library whose resolution has actually gone wrong here (a half-found package becomes a bare -lsqlite3).
+          grep -E "shadow: sqlite3|aurora: (Using|Fetching) sqlite3" configure.log | head -3 | while IFS= read -r line; do
+            printf '::warning title=sqlite3 ::%s\n' "$(printf '%s' "$line" | sed 's/^-- //' | head -c 600)"
+          done
+          grep -E "aurora: (Using|Fetching)" configure.log | grep -v sqlite | sort -u | head -6 | while IFS= read -r line; do
             printf '::notice ::%s\n' "$(printf '%s' "$line" | sed 's/^-- //' | head -c 300)"
           done
           # Every translation unit the build knows about, as a build target, so we can compile them all and skip the

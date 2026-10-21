@@ -2,20 +2,21 @@
 """Turn a ninja build.log into GitHub annotations that carry their own context.
 
 Why this exists: the build log lives in an artifact (blob storage) and `gh run view --log` is not always reachable, so
-the check-run annotations are the channel that actually gets read. A bare "error:" line says what broke but not where
-it was instantiated from, and for "file not found" it does not say what include paths the compiler had - which is
-exactly the information needed to fix it. So each annotation here carries:
+the check-run annotations are the channel that actually gets read. A bare "error:" line says what broke but not why,
+and the three things needed to fix a cross-compilation failure are:
 
-  * the error line itself and the two lines after it (clang puts the note/caret there),
-  * up to six lines of "In file included from ..." / "in instantiation of ..." chain before it,
-  * the compile command that failed, truncated, so the -I flags are visible.
+  * the *include chain* ("In file included from ..."), i.e. which of our files pulled the header in;
+  * the *include path* the compiler actually had (every -I/-isystem), which immediately answers
+    "fatal error: 'sqlite3.h' file not found";
+  * the *notes* clang prints after the error (the "candidate constructor not viable" lines), which are the whole
+    explanation for a template error such as "no matching function for call to '__construct_at'".
 
-GitHub shows at most ten error annotations per step, so at most ten are emitted; everything else still goes to the
-step summary (full text) and to build.log (the whole thing).
+GitHub shows at most ten error annotations per step, so at most ten are emitted; everything is also printed as plain
+text with --report for the job summary.
 
 Usage: ci_errors.py build.log [--limit N] [--report]
-Without --report it prints the ::error:: workflow commands (the annotations); with it, the same findings as readable text
-for the job summary instead.
+Without --report it prints the ::error:: workflow commands (the annotations); with it, the same findings as readable
+text for the job summary instead.
 """
 from __future__ import annotations
 
@@ -24,9 +25,16 @@ import re
 import sys
 
 ERROR_RE = re.compile(r"(?::\d+:\d+: (?:fatal )?error:|^error:)")
-CONTEXT_RE = re.compile(r"^(?:In file included from|.*: note: in instantiation|.*requested here|.*: note: .*required from)")
 FAILED_RE = re.compile(r"^FAILED: ")
+PROGRESS_RE = re.compile(r"^\[\d+/\d+\] ")
 COMMAND_RE = re.compile(r"\s-c\s")
+CONTEXT_RE = re.compile(
+    r"^(?:In file included from|.*: note: in instantiation|.*requested here|.*: note: .*required from)")
+INCLUDE_RE = re.compile(r"(?:-I\S+|-isystem\s+\S+|-iquote\s*\S+)")
+TAIL_STOP_RE = re.compile(r"^(?:ninja: |FAILED: |\[\d+/\d+\] |\d+ (?:warning|error)s? generated)")
+
+MAX_AFTER_LINES = 30
+MAX_MESSAGE = 6000
 
 
 def escape(text: str) -> str:
@@ -44,7 +52,7 @@ def blocks(lines: list[str]):
             current = [line.rstrip("\n")]
         elif current is not None:
             # A new [n/m] step line means the previous failure is over even if ninja printed no trailer.
-            if re.match(r"^\[\d+/\d+\] ", line):
+            if PROGRESS_RE.match(line):
                 yield current
                 current = None
             else:
@@ -57,7 +65,7 @@ def compile_command(block: list[str]) -> str:
     """The command ninja ran: the longest line mentioning `-c` (the [n/m] progress line is the same command)."""
     best = ""
     for line in block:
-        stripped = re.sub(r"^\[\d+/\d+\] ", "", line)
+        stripped = PROGRESS_RE.sub("", line)
         if COMMAND_RE.search(stripped) and len(stripped) > len(best):
             best = stripped
     if not best:
@@ -65,40 +73,72 @@ def compile_command(block: list[str]) -> str:
             if line.startswith(("cd ", "/", "cmake ")):
                 best = line
                 break
-    return best if len(best) <= 1600 else best[:800] + " ... " + best[-700:]
+    return best
 
 
-def errors(block: list[str]):
-    """(index, line) for every error line in the block, keeping the file it was reported in."""
-    for index, line in enumerate(block):
-        if ERROR_RE.search(line) and not line.lstrip().startswith("ninja:"):
-            yield index, line
+def include_path(command: str) -> str:
+    """Just the include flags, deduplicated: the part of a long command line that answers "header not found"."""
+    seen: list[str] = []
+    for flag in INCLUDE_RE.findall(command):
+        flag = flag.replace("-isystem ", "-isystem ").strip()
+        if flag not in seen:
+            seen.append(flag)
+    return " ".join(seen)
+
+
+def context_chain(block: list[str], index: int) -> list[str]:
+    """The contiguous run of include/instantiation lines immediately above the error."""
+    chain: list[str] = []
+    cursor = index - 1
+    while cursor >= 0 and CONTEXT_RE.match(block[cursor].strip()):
+        chain.append(block[cursor].strip())
+        cursor -= 1
+        if len(chain) >= 12:
+            break
+    chain.reverse()
+    return chain
+
+
+def notes(block: list[str], index: int) -> list[str]:
+    """What clang printed after the error: candidate lists, "required from here", the caret lines."""
+    tail: list[str] = []
+    for line in block[index + 1:]:
+        if TAIL_STOP_RE.match(line):
+            break
+        if len(tail) < MAX_AFTER_LINES:
+            tail.append(line.rstrip())
+    # Drop the trailing blank lines but keep the structure in between.
+    while tail and not tail[-1].strip():
+        tail.pop()
+    return tail
 
 
 def message(block: list[str], index: int, command: str) -> str:
-    error = block[index]
-    after = [line for line in block[index + 1:index + 3] if line.strip()]
-    context = [line for line in block[max(0, index - 8):index] if CONTEXT_RE.match(line.strip())][-6:]
-    parts = [error]
-    parts.extend(after)
-    if context:
+    parts = [block[index].rstrip()]
+    parts.extend(notes(block, index))
+    chain = context_chain(block, index)
+    if chain:
         parts.append("... included from:")
-        parts.extend(context)
+        parts.extend(chain)
+    includes = include_path(command)
+    if includes:
+        parts.append("include path: " + includes)
     if command:
-        parts.append("command: " + command)
-    return "\n".join(parts)
+        parts.append("compile: " + (command if len(command) <= 300 else command[:300] + " ..."))
+    text = "\n".join(parts)
+    return text if len(text) <= MAX_MESSAGE else text[:MAX_MESSAGE] + "\n... (truncated)"
 
 
 def main(argv: list[str]) -> int:
     if len(argv) < 2:
         print(__doc__.strip().splitlines()[0])
-        print("usage: ci_errors.py build.log [--limit N]", file=sys.stderr)
+        print("usage: ci_errors.py build.log [--limit N] [--report]", file=sys.stderr)
         return 2
     path = argv[1]
     limit = 10
-    report_only = "--report" in argv
     if "--limit" in argv:
         limit = int(argv[argv.index("--limit") + 1])
+    report_only = "--report" in argv
     if not os.path.exists(path):
         print(f"::warning ::{escape(path)} was never written, so the compiler produced no output to report")
         return 0
@@ -111,12 +151,14 @@ def main(argv: list[str]) -> int:
     emitted = 0
     for block in blocks(lines):
         command = compile_command(block)
-        for index, line in errors(block):
-            text = message(block, index, command)
-            key = re.sub(r":\d+:\d+", "", line)     # same complaint about the same file twice is one complaint
+        for index, line in enumerate(block):
+            if not ERROR_RE.search(line) or line.lstrip().startswith("ninja:"):
+                continue
+            key = re.sub(r":\d+:\d+", "", line)     # the same complaint about the same file twice is one complaint
             if key in seen:
                 continue
             seen.add(key)
+            text = message(block, index, command)
             report.append(text)
             if emitted < limit:
                 if not report_only:

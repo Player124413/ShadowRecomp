@@ -21,28 +21,62 @@ if(ANDROID)
   set(AURORA_SDL3_PROVIDER vendor CACHE STRING "" FORCE)
   set(AURORA_SDL3_LINKAGE shared CACHE STRING "" FORCE)
 endif()
-add_subdirectory(third_party/aurora ${CMAKE_BINARY_DIR}/aurora EXCLUDE_FROM_ALL)
 
-# sqlite3 backs Aurora's pipeline and texture caches. Aurora looks for it in three ways - an installed package, a
-# pkg-config file, or fetching the SQLite amalgamation - but if all three come up empty, `target_link_libraries(... sqlite3)`
-# does not fail at configure time: the name is then taken as a plain library (`-lsqlite3`) and the sources that include
-# <sqlite3.h> fail to compile with "file not found". That is what happened on the Android CI machine. So check here and
-# fetch the amalgamation ourselves in that case; the include directory is then ours to set.
-if(TARGET sqlite3)
-  get_target_property(_shadow_sqlite_include sqlite3 INTERFACE_INCLUDE_DIRECTORIES)
-  message(STATUS "shadow: sqlite3 target present (include dirs: ${_shadow_sqlite_include})")
-else()
-  message(STATUS "shadow: aurora produced no sqlite3 target - fetching the SQLite amalgamation")
-  include(FetchContent)
+# --- sqlite3, before Aurora gets to choose ---------------------------------------------------------------
+# Aurora's pipeline and texture caches include <sqlite3.h>. It tries an installed package, then pkg-config, then the
+# SQLite amalgamation - but on Android none of the first two can be right: the NDK ships no sqlite3 and a pkg-config hit
+# on the build machine would be the host's copy. Aurora only creates the `sqlite3` target when none exists, so the
+# deterministic answer is to build the amalgamation for the target ABI here, first.
+include(FetchContent)
+function(shadow_fetch_sqlite3 target_name)
   FetchContent_Declare(shadow_sqlite3
     URL https://sqlite.org/2026/sqlite-amalgamation-3510300.zip
     URL_HASH SHA256=acb1e6f5d832484bf6d32b681e858c38add8b2acdfd42ac5df24b8afb46552b4
     DOWNLOAD_EXTRACT_TIMESTAMP FALSE
+    EXCLUDE_FROM_ALL
   )
   FetchContent_MakeAvailable(shadow_sqlite3)
-  add_library(sqlite3 STATIC ${shadow_sqlite3_SOURCE_DIR}/sqlite3.c)
-  target_include_directories(sqlite3 PUBLIC ${shadow_sqlite3_SOURCE_DIR})
-  message(STATUS "shadow: sqlite3 fetched into ${shadow_sqlite3_SOURCE_DIR}")
+  add_library(${target_name} STATIC ${shadow_sqlite3_SOURCE_DIR}/sqlite3.c)
+  target_include_directories(${target_name} PUBLIC ${shadow_sqlite3_SOURCE_DIR})
+  if(ANDROID)
+    # Bionic keeps dlopen in libc, but naming it is harmless and the maths library is not implicit in a static archive.
+    target_link_libraries(${target_name} PUBLIC ${CMAKE_DL_LIBS} m)
+  endif()
+  message(STATUS "shadow: sqlite3 built from the amalgamation in ${shadow_sqlite3_SOURCE_DIR}")
+endfunction()
+
+if(ANDROID AND NOT TARGET sqlite3)
+  shadow_fetch_sqlite3(sqlite3)
+endif()
+
+add_subdirectory(third_party/aurora ${CMAKE_BINARY_DIR}/aurora EXCLUDE_FROM_ALL)
+
+# Anywhere else, trust what Aurora resolved, but only if it really has the header: `target_link_libraries(.. sqlite3)`
+# treats a missing target as a plain library name, so a half-found package silently becomes -lsqlite3 and the sources
+# that include <sqlite3.h> fail one by one instead of the configure step saying so.
+set(_shadow_sqlite_ok FALSE)
+if(TARGET sqlite3)
+  get_target_property(_shadow_sqlite_include_dirs sqlite3 INTERFACE_INCLUDE_DIRECTORIES)
+  foreach(_dir IN LISTS _shadow_sqlite_include_dirs)
+    if(EXISTS "${_dir}/sqlite3.h")
+      set(_shadow_sqlite_ok TRUE)
+    endif()
+  endforeach()
+  message(STATUS "shadow: sqlite3 target from aurora (include dirs: ${_shadow_sqlite_include_dirs})")
+endif()
+if(NOT _shadow_sqlite_ok)
+  if(TARGET sqlite3)
+    # An imported/alias target cannot be given include directories; build our own and hand the header to the targets
+    # that need it, which is enough because the link name is already right.
+    shadow_fetch_sqlite3(shadow_sqlite3)
+    foreach(_target aurora_core aurora_gx)
+      if(TARGET ${_target})
+        target_include_directories(${_target} PRIVATE ${shadow_sqlite3_SOURCE_DIR})
+      endif()
+    endforeach()
+  else()
+    shadow_fetch_sqlite3(sqlite3)
+  endif()
 endif()
 
 # generated/ is produced by tools/gen.py from the player's own disc image and is never committed. Without it there is
