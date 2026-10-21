@@ -88,6 +88,23 @@ if(NOT EXISTS ${CMAKE_CURRENT_LIST_DIR}/generated/files.cmake)
     "  takes from the disc folder or from --dol; the result (the recompiled game code) stays out of git.")
 endif()
 include(generated/files.cmake)
+
+# A launcher-only build: `python tools/android/stub_generated.py --definitions` writes empty stand-ins for the game's
+# recompiled functions, which makes the app link and install without anyone's disc. It cannot play anything - every
+# guest function returns at once - but it is how the APK pipeline itself (Gradle, the NDK, SDL3's Java classes, the
+# 16 KB page alignment) gets built and tested without the game. The stand-in source refuses to compile unless this
+# option is on, so a real build cannot pick it up by accident.
+option(SHADOW_STUB_GAME_CODE "Link stand-ins for the game code (launcher-only build; cannot play a disc)" OFF)
+if(SHADOW_STUB_GAME_CODE)
+  set(_shadow_stub_source ${CMAKE_CURRENT_LIST_DIR}/generated/stub_definitions.cpp)
+  if(NOT EXISTS ${_shadow_stub_source})
+    message(FATAL_ERROR "SHADOW_STUB_GAME_CODE is on but generated/stub_definitions.cpp is missing.\n"
+      "  Run:  python tools/android/stub_generated.py --definitions")
+  endif()
+  list(APPEND GEN_SOURCES ${_shadow_stub_source})
+  add_compile_definitions(SHADOW_STUB_GAME_CODE=1)
+  message(STATUS "shadow: launcher-only build, the game code is a stand-in (no disc can be played)")
+endif()
 file(GLOB RT_SOURCES ${CMAKE_CURRENT_LIST_DIR}/runtime/*.cpp)
 # The exe icon and launcher art (runtime/shadow.ico, runtime/assets/*.png) come from the game, so they are not in git:
 # a fresh clone builds with the neutral placeholders instead. An existing file is never replaced.

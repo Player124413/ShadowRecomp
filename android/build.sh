@@ -35,6 +35,16 @@ if [ ! -f "$root/generated/files.cmake" ]; then
   (cd "$root" && python3 tools/gen.py) || die "tools/gen.py failed (it needs your own disc image's main.dol)"
 fi
 
+# ---- 1b. a launcher-only build, for checking the APK pipeline without a disc ---------------------
+# SHADOW_STUB_GAME_CODE=1 links empty stand-ins for the game code: the app installs and shows its launcher, but cannot
+# play. Useful to see that the whole Gradle/NDK/SDL path works before running tools/gen.py.
+if [ "${SHADOW_STUB_GAME_CODE:-0}" = "1" ] && [ "$task" != "clean" ]; then
+  say "launcher-only build: the game code is a stand-in and the app cannot play a disc"
+  (cd "$root" && python3 tools/android/stub_generated.py --definitions) || die "could not write the stand-in game code"
+  SHADOW_GRADLE_ARGS="${SHADOW_GRADLE_ARGS:-} -Pshadow.stubGameCode=ON"
+  export SHADOW_GRADLE_ARGS
+fi
+
 # ---- 2. a JDK -----------------------------------------------------------------------------------
 if [ -z "${JAVA_HOME:-}" ] || [ ! -x "${JAVA_HOME}/bin/javac" ]; then
   JAVA_HOME=""

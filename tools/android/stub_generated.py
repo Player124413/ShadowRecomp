@@ -5,17 +5,23 @@
 committed. That makes a plain CI checkout unbuildable, which is a bad place to be: the Android port's code is
 where breakage hides, and nobody wants to find it on their phone.
 
-So this script synthesises the two things the build needs from `generated/`:
+So this script synthesises what the build needs from `generated/`:
 
   generated/files.cmake  - GEN_SOURCES, empty (no recompiled game code to add)
   generated/funcs.h      - a declaration for every guest function the runtime calls by name
+  generated/stub_definitions.cpp   (--definitions only) - an empty body for each of them, so that the native library
+                           can also be *linked* and an APK assembled. CMake only compiles it with
+                           -DSHADOW_STUB_GAME_CODE=ON, so it cannot end up in a real build by accident.
 
-The result compiles everything (runtime + Aurora + the Android glue) and links nothing: a link would need the real
-recompiled functions. That is exactly what "does the port still build?" needs to know, and nothing more. It is NOT a
-usable game: `python tools/gen.py` remains the only way to get one of those.
+Without --definitions the result compiles everything (runtime + Aurora + the Android glue) and links nothing: a link
+would need the real recompiled functions. That is exactly what "does the port still build?" needs to know.
 
-    python3 tools/android/stub_generated.py         # writes generated/, prints what it did
-    cmake -B build ... && ninja -k 0                # compile-only: the link step is expected to fail
+With --definitions the app links, installs and shows its launcher, but it cannot play anything: every guest function
+returns immediately. Use it to check the APK pipeline on a machine that has no disc. `python tools/gen.py` remains the
+only way to get a working game.
+
+    python3 tools/android/stub_generated.py                 # compile only (CI's compile job)
+    python3 tools/android/stub_generated.py --definitions   # ... and linkable, for a launcher-only APK
 """
 import os
 import re
@@ -45,24 +51,48 @@ def sources():
                         continue
 
 
-def scan() -> tuple[list[str], list[str]]:
+def scan() -> tuple[list[str], list[str], set[str]]:
     guest = set()
     hle = set()
     odd_signature = set()
+    defined = set()
     texts = list(sources())
     for _, text in texts:
         guest.update(CALL_RE.findall(text))
         hle.update(HLE_RE.findall(text))
         for name, params in HLE_DEF.findall(text):
+            defined.add(name)
             # count the parameters: a "(Cpu& c, uint32_t target)" definition cannot be declared as "(Cpu&)"
             if params.count(",") >= 1 and params.strip():
                 odd_signature.add(name)
     hle -= odd_signature
-    return sorted(guest), sorted(hle)
+    return sorted(guest), sorted(hle), defined
+
+
+def definitions(guest: list[str], hle: list[str], defined: set[str]) -> str:
+    """Stand-in bodies for the guest functions, for a launcher-only build (see the module docstring)."""
+    body = ["// written by tools/android/stub_generated.py - NOT the game's code.",
+            "//",
+            "// One empty body per guest function the runtime calls by name. It exists so a launcher-only APK can be built",
+            "// and installed before the player has run tools/gen.py against their own disc; it plays nothing. The guard",
+            "// below is deliberate: a normal configure does not define SHADOW_STUB_GAME_CODE, so a real build cannot",
+            "// silently link this file and ship an app that does nothing.",
+            "#ifndef SHADOW_STUB_GAME_CODE",
+            "#error \"stub_definitions.cpp is a stand-in for the game code; configure with -DSHADOW_STUB_GAME_CODE=ON\"",
+            "#endif",
+            "",
+            "#include \"funcs.h\"",
+            ""]
+    body += ["void %s(Cpu&) {}" % n for n in guest]
+    # hle_* overrides that the runtime does not define itself (the ones it does would be duplicate symbols).
+    body += ["void %s(Cpu&) {}" % n for n in hle if n not in defined]
+    body.append("")
+    return "\n".join(body)
 
 
 def main() -> int:
-    guest, hle = scan()
+    write_definitions = "--definitions" in sys.argv[1:]
+    guest, hle, defined = scan()
     names = guest + hle
     os.makedirs(OUT, exist_ok=True)
     written = []
@@ -72,6 +102,13 @@ def main() -> int:
     if not (os.path.exists(files_cmake) and open(files_cmake, encoding="utf-8").read() == text):
         open(files_cmake, "w", encoding="utf-8").write(text)
         written.append("files.cmake")
+
+    if write_definitions:
+        stub_cpp = os.path.join(OUT, "stub_definitions.cpp")
+        text = definitions(guest, hle, defined)
+        if not (os.path.exists(stub_cpp) and open(stub_cpp, encoding="utf-8").read() == text):
+            open(stub_cpp, "w", encoding="utf-8").write(text)
+            written.append("stub_definitions.cpp")
 
     funcs_h = os.path.join(OUT, "funcs.h")
     body = ["#pragma once",

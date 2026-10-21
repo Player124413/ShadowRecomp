@@ -33,7 +33,9 @@ android {
         externalNativeBuild {
             cmake {
                 // Static libc++: one less .so to ship and to keep in sync with SDL3.
-                arguments '-DANDROID_STL=c++_static', '-DANDROID_PLATFORM=android-26', '-DCMAKE_BUILD_TYPE=Release'
+                arguments '-DANDROID_STL=c++_static', '-DANDROID_PLATFORM=android-26', '-DCMAKE_BUILD_TYPE=Release',
+                        // Launcher-only build (no disc yet): link stand-ins for the game code. -Pshadow.stubGameCode=ON
+                        "-DSHADOW_STUB_GAME_CODE=${project.findProperty('shadow.stubGameCode') ?: 'OFF'}"
                 cppFlags '-std=c++20'
             }
         }

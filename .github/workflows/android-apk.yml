@@ -10,10 +10,12 @@ name: Android APK
 #   compile       - compiles the whole native port (runtime + Aurora + the Android glue) for arm64 with the real NDK,
 #                   WITHOUT the game code: tools/android/stub_generated.py stands in for generated/, and every object
 #                   file is built while the link is left out. This is the check that catches "it stopped building".
-#   apk           - the actual installable APK. It needs the recompiled game code, which only exists on the machine of
-#                   someone who owns the disc, so this job runs only when the repository has that code to hand: set the
-#                   SHADOW_GEN_URL secret to a .tar.gz of your generated/ folder (see android/README.md). Without it the
-#                   job says so and skips instead of failing.
+#   apk           - the actual installable APK. The recompiled game code only exists on the machine of someone who owns
+#                   the disc, so with the SHADOW_GEN_URL secret (a .tar.gz of your generated/ folder) this builds the real
+#                   thing. Without it, it builds a *launcher-only* APK instead: the same Gradle/NDK/SDL3/CMake packaging
+#                   path, with empty stand-ins in place of the game code (tools/android/stub_generated.py --definitions).
+#                   That one installs and shows the launcher but cannot play; it exists so the packaging itself is built
+#                   and tested on every push rather than on the one machine that owns a disc.
 #
 # Nothing here touches the game's data: the disc image, the DOL and generated/ are never committed, and the APK artifact
 # contains the recompiled code, not the disc.
@@ -102,6 +104,13 @@ jobs:
               tools/android/etc2_check.cpp third_party/aurora/lib/gfx/etc2_encode.cpp -o /tmp/etc2_check
           /tmp/etc2_check /tmp/etc2_blocks.bin
           python3 tools/android/etc2_check.py /tmp/etc2_blocks.bin
+
+      - name: Launcher-only stand-ins compile
+        # The APK job links these when there is no disc code; a broken generator would only show up there.
+        run: |
+          python3 tools/android/stub_generated.py --definitions
+          g++ -std=c++20 -fsyntax-only -DSHADOW_STUB_GAME_CODE=1 -Igenerated generated/stub_definitions.cpp
+          echo "stub_definitions.cpp compiles"
 
       - name: This workflow parses
         run: |
@@ -220,11 +229,12 @@ jobs:
         run: |
           if [ -n "$GEN_URL" ]; then
             echo "have=yes" >> "$GITHUB_OUTPUT"
+            echo "::notice::Building the real APK from the generated/ tarball in SHADOW_GEN_URL."
           else
             echo "have=no" >> "$GITHUB_OUTPUT"
-            echo "::notice::No SHADOW_GEN_URL secret, so there is no game code to link and no APK can be built here." \
-                 "Run 'python tools/gen.py' on a machine with your disc, tar up generated/, host the tarball and set" \
-                 "SHADOW_GEN_URL to its (private) URL - see android/README.md."
+            echo "::notice::No SHADOW_GEN_URL secret, so there is no game code to link: building a *launcher-only* APK "\
+                 "instead (it installs and shows the launcher, but cannot play). For the real one, run 'python tools/gen.py' "\
+                 "on a machine with your disc, tar up generated/, host the tarball and set SHADOW_GEN_URL - see android/README.md."
           fi
 
       - name: Fetch and unpack generated/
@@ -239,35 +249,35 @@ jobs:
             || tar -xzf /tmp/generated.tar.gz -C generated        # also accept a tarball without a top folder
           test -f generated/files.cmake || { echo "generated/files.cmake missing from the tarball"; exit 1; }
 
+      - name: Stand-in generated/ (launcher-only APK)
+        if: steps.gamecode.outputs.have == 'no'
+        run: python3 tools/android/stub_generated.py --definitions
+
       - uses: actions/setup-java@v4
-        if: steps.gamecode.outputs.have == 'yes'
         with:
           distribution: temurin
           java-version: '17'
 
       - name: Android SDK, NDK and CMake
-        if: steps.gamecode.outputs.have == 'yes'
         uses: android-actions/setup-android@v3
         with:
           packages: 'platforms;android-${{ env.SDK_PLATFORM }} build-tools;${{ env.BUILD_TOOLS }} ndk;${{ env.NDK_VERSION }} cmake;${{ env.SDK_CMAKE }}'
 
       - name: Build the APK
-        if: steps.gamecode.outputs.have == 'yes'
         env:
           # Keep Gradle and the Android build files in the workspace, and let the build use a .gradle-dist download.
           GRADLE_OPTS: -Dorg.gradle.daemon=false
           # The Gradle project asks for CMake 3.25.1; the SDK package that actually exists is 3.22.1. AGP is happy with
-          # either, so tell it which one is installed here.
-          SHADOW_GRADLE_ARGS: -Pshadow.cmake=${{ env.SDK_CMAKE }}
+          # either, so tell it which one is installed here. The second flag is what makes the launcher-only APK link.
+          SHADOW_GRADLE_ARGS: -Pshadow.cmake=${{ env.SDK_CMAKE }} -Pshadow.stubGameCode=${{ steps.gamecode.outputs.have == 'yes' && 'OFF' || 'ON' }}
         run: |
           chmod +x android/build.sh
           cd android && ./build.sh debug
 
       - name: Upload the APK
-        if: steps.gamecode.outputs.have == 'yes'
         uses: actions/upload-artifact@v4
         with:
-          name: shadowrecomp-android-arm64-debug
+          name: ${{ steps.gamecode.outputs.have == 'yes' && 'shadowrecomp-android-arm64-debug' || 'shadowrecomp-android-launcher-only' }}
           path: android/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
           retention-days: 30
