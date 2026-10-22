@@ -1703,14 +1703,12 @@ const char* gpu_backend_name() {
   }
 }
 const char* gpu_adapter_name() {
-  // AdapterInfo::device is a StringView: data is not NUL-terminated, so it cannot be handed to printf as it is.
+  // AdapterInfo::device is a StringView, not a C string: it cannot be handed to printf as it is. It converts to
+  // string_view, which also resolves the WGPU_STRLEN "measure it yourself" sentinel.
+  // AdapterInfo's copy constructor is deleted (it points into Dawn), so it is read in place, never copied.
   static std::string name;
-  if (name.empty()) {
-    const auto info = aurora::webgpu::g_adapterInfo;
-    if (info.device.data != nullptr) name.assign(info.device.data, info.device.length);
-    if (name.empty()) name = "unknown GPU";
-  }
-  return name.c_str();
+  if (name.empty()) name.assign(std::string_view{aurora::webgpu::g_adapterInfo.device});   // empty until the adapter exists
+  return name.empty() ? "unknown GPU" : name.c_str();
 }
 int etc2_mode() { return aurora::gfx::etc2::stats().mode; }
 uint64_t etc2_textures() { return aurora::gfx::etc2::stats().textures; }

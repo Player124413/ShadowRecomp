@@ -19,7 +19,7 @@ struct DrawData {
   uint32_t dstAlpha;
 };
 
-constexpr uint32_t GXPipelineConfigVersion = 14;   // 14: the two render diagnostics below
+constexpr uint32_t GXPipelineConfigVersion = 14;   // 14: the render diagnostics below
 struct PipelineConfig {
   uint32_t version = GXPipelineConfigVersion;
   uint32_t msaaSamples = 1; // deprecated
@@ -34,10 +34,15 @@ struct PipelineConfig {
   uint32_t polygonOffsetScaleBits;
   uint32_t polygonOffsetClampBits;
   bool depthCompare, depthUpdate, alphaUpdate, colorUpdate;
-  // Diagnostics (Settings > System > Bug reports): part of the key on purpose, so flipping one builds new pipelines at
-  // once instead of reusing the ones already cached from before the flip.
-  bool debugNoCull, debugNoDepthTest;
+  // Diagnostics (Settings > System > Bug reports), part of the key on purpose so flipping one builds new pipelines at once
+  // instead of reusing the cached ones: bit 0 = draw both sides, bit 1 = ignore the depth test.
+  // One uint32_t and not two bools: the pipeline key is the struct's raw bytes, so every byte must be a field. Four bools
+  // plus two more would have ended in two bytes of padding, and std::has_unique_object_representations (asserted below,
+  // and again in gfx/hash.hpp where the key is hashed) rejects exactly that.
+  uint32_t debugFlags = 0;
 };
+inline constexpr uint32_t kDebugNoCull = 1u << 0;
+inline constexpr uint32_t kDebugNoDepthTest = 1u << 1;
 static_assert(std::has_unique_object_representations_v<PipelineConfig>);
 
 struct PipelineOptions {

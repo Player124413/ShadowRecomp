@@ -8,7 +8,9 @@
 # shows up immediately.
 #
 # Third-party headers the runtime uses are looked for in SHADOW_SDL3_INCLUDE, SHADOW_IMGUI_INCLUDE, SHADOW_XXHASH_INCLUDE
-# and SHADOW_DAWN_INCLUDE (or in a few conventional locations). Whatever is missing means the files that need it are
+# and SHADOW_DAWN_INCLUDE (or in a few conventional locations). SHADOW_DAWN_INCLUDE wants Dawn's *generated* headers too
+# (dawn/webgpu_cpp.h and dawn/webgpu.h are produced by Dawn's own generator, they are not in its git tree): a
+# space-separated list is accepted, e.g. SHADOW_DAWN_INCLUDE="/tmp/dawn_gen/include /tmp/dawn-src/include". Whatever is missing means the files that need it are
 # *skipped* and listed, not failed: the point is the runtime, and a machine without the renderer's sources can still
 # check most of it. tools/android/stubs holds the two small hand-written stand-ins (libpng, stb_truetype) that the
 # texture pack code needs, because those are not fetched into the tree.
@@ -42,8 +44,11 @@ add_dir xxhash "${SHADOW_XXHASH_INCLUDE:-}" || \
 # Aurora logs through fmt; its headers are only needed to compile, so any fmt 11 tree will do.
 add_dir fmt "${SHADOW_FMT_INCLUDE:-}" || \
   add_dir fmt /tmp/fmt/include || MISSING+=("fmt (SHADOW_FMT_INCLUDE)")
-add_dir dawn "${SHADOW_DAWN_INCLUDE:-}" || \
-  add_dir dawn /tmp/bt/_deps/dawn-src/include || MISSING+=("Dawn (SHADOW_DAWN_INCLUDE)")
+dawn_ok=0
+for dir in ${SHADOW_DAWN_INCLUDE:-} /tmp/bt/_deps/dawn-src/include; do
+  add_dir dawn "$dir" && dawn_ok=1
+done
+[ "$dawn_ok" = 1 ] || MISSING+=("Dawn (SHADOW_DAWN_INCLUDE)")
 # Dawn generates dawn/webgpu_cpp.h at build time; the stub only says where the real one lives.
 if [ -d /tmp/dawnstub ]; then INCLUDES+=("-I/tmp/dawnstub"); fi
 
@@ -62,7 +67,10 @@ skipped=0
 checked=0
 for source in "$ROOT"/runtime/*.cpp; do
   name=$(basename "$source")
-  output=$("$CXX" -std=c++20 -fsyntax-only -D__ANDROID__ "${INCLUDES[@]}" "$source" 2>&1)
+  # TARGET_PC / AURORA / WEBGPU_DAWN are what aurora_core sets PUBLIC, and the runtime includes its headers: without
+  # them GX_TF_R8_PC and friends do not exist and every renderer file would "fail" for the wrong reason.
+  output=$("$CXX" -std=c++20 -fsyntax-only -D__ANDROID__ -DTARGET_PC -DAURORA -DWEBGPU_DAWN \
+           "${INCLUDES[@]}" "$source" 2>&1)
   if [ -z "$(printf '%s' "$output" | grep -E 'error:')" ]; then
     checked=$((checked + 1))
     continue

@@ -421,10 +421,10 @@ wgpu::RenderPipeline build_pipeline(const PipelineConfig& config, const gfx::Ren
   }
   const wgpu::DepthStencilState depthStencil{
       .format = layout.depthStencilFormat,
-      .depthWriteEnabled = config.debugNoDepthTest ? false : writesDepth,
-      .depthCompare = config.debugNoDepthTest      ? wgpu::CompareFunction::Always
-                      : config.depthCompare        ? to_compare_function(config.depthFunc)
-                                                   : wgpu::CompareFunction::Always,
+      .depthWriteEnabled = (config.debugFlags & kDebugNoDepthTest) ? false : writesDepth,
+      .depthCompare = (config.debugFlags & kDebugNoDepthTest) ? wgpu::CompareFunction::Always
+                      : config.depthCompare                  ? to_compare_function(config.depthFunc)
+                                                             : wgpu::CompareFunction::Always,
       .depthBias = round_away_from_zero<int32_t>(depthBias),
       .depthBiasSlopeScale = depthBiasSlopeScale,
       .depthBiasClamp = depthBiasClamp,
@@ -458,7 +458,7 @@ wgpu::RenderPipeline build_pipeline(const PipelineConfig& config, const gfx::Ren
               .bufferCount = static_cast<uint32_t>(vtxBuffers.size()),
               .buffers = vtxBuffers.data(),
           },
-      .primitive = to_primitive_state(config.cullMode, config.debugNoCull),
+      .primitive = to_primitive_state(config.cullMode, (config.debugFlags & kDebugNoCull) != 0),
       .depthStencil = layout.depthStencilFormat != wgpu::TextureFormat::Undefined ? &depthStencil : nullptr,
       .multisample = wgpu::MultisampleState{.count = layout.sampleCount},
       .fragment = &fragmentState,
@@ -581,8 +581,7 @@ void populate_pipeline_config(PipelineConfig& config, GXPrimitive primitive, GXV
       .depthUpdate = g_gxState.depthUpdate,
       .alphaUpdate = alphaUpdate,
       .colorUpdate = g_gxState.colorUpdate,
-      .debugNoCull = g_debugNoCull,
-      .debugNoDepthTest = g_debugNoDepthTest,
+      .debugFlags = (g_debugNoCull ? kDebugNoCull : 0u) | (g_debugNoDepthTest ? kDebugNoDepthTest : 0u),
   };
 }
 
