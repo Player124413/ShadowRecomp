@@ -13,6 +13,7 @@
 #include "gfx/etc2_encode.hpp"
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <cstdio>
 #include <cstring>
@@ -59,6 +60,25 @@ void make_ui(Image& im) {
   im.alpha = true;
 }
 
+// Shading: what a character, a wall or the ground looks like - smooth light with a little dither. The closest thing to
+// the game's actual art among these images, and the one that would show a bad modifier-table or base-colour choice.
+void make_shaded(Image& im) {
+  im.rgba.resize(im.w * im.h * 4);
+  uint32_t s = 7;
+  for (int y = 0; y < im.h; ++y)
+    for (int x = 0; x < im.w; ++x) {
+      uint8_t* p = &im.rgba[(y * im.w + x) * 4];
+      const float fx = (float)x / im.w, fy = (float)y / im.h;
+      const float shade = 0.35f + 0.65f * (0.5f + 0.5f * std::sin(fx * 12.0f) * std::cos(fy * 7.0f));
+      s = s * 1664525u + 1013904223u;
+      const int n = (int)((s >> 28) & 3) - 2;
+      p[0] = clamp8(210.0f * shade + n);
+      p[1] = clamp8(170.0f * shade + n);
+      p[2] = clamp8(120.0f * shade + n);
+      p[3] = 255;
+    }
+}
+
 // Noise: the worst case, the number that should look bad (it shows the encoder is not cheating).
 void make_noise(Image& im) {
   im.rgba.resize(im.w * im.h * 4);
@@ -102,13 +122,15 @@ bool check_upload_size() {
 int main(int argc, char** argv) {
   if (!check_upload_size()) return 1;
   const char* path = argc > 1 ? argv[1] : "etc2_blocks.bin";
-  std::vector<Image> images(3);
+  std::vector<Image> images(4);
   images[0] = Image{"gradient", 64, 64, {}, false};
   images[1] = Image{"ui", 64, 64, {}, false};
   images[2] = Image{"noise", 64, 64, {}, false};
+  images[3] = Image{"shaded", 96, 96, {}, false};
   make_gradient(images[0]);
   make_ui(images[1]);
   make_noise(images[2]);
+  make_shaded(images[3]);
 
   FILE* f = fopen(path, "wb");
   if (!f) {
@@ -128,6 +150,7 @@ int main(int argc, char** argv) {
     std::vector<uint8_t> blocks;
     blocks.reserve((im.w / 4) * (im.h / 4) * block_size);
     uint8_t tmp[16];
+    const auto start = std::chrono::steady_clock::now();
     for (int by = 0; by < im.h; by += 4)
       for (int bx = 0; bx < im.w; bx += 4) {
         const uint8_t* src = &im.rgba[(by * im.w + bx) * 4];
@@ -142,8 +165,13 @@ int main(int argc, char** argv) {
       }
     fwrite(im.rgba.data(), 1, im.rgba.size(), f);
     fwrite(blocks.data(), 1, blocks.size(), f);
-    printf("%-9s %dx%d %s -> %zu bytes of blocks (source %zu)\n", im.name, im.w, im.h, im.alpha ? "RGBA" : "RGB",
-           blocks.size(), im.rgba.size());
+    // Time per 4x4 block: this runs on the render thread during a texture upload, so it is worth printing. For scale,
+    // a 60 fps frame is 16.6 ms; the earlier, more thorough search took 16 us per RGB block, which is a visible hitch
+    // at texture-load sizes (a 512x512 texture is over 16 thousand blocks).
+    const double ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count();
+    const int block_total = (im.w / 4) * (im.h / 4);
+    printf("%-9s %dx%d %s -> %zu bytes of blocks (source %zu), %.2f us/block\n", im.name, im.w, im.h,
+           im.alpha ? "RGBA" : "RGB", blocks.size(), im.rgba.size(), ms * 1000.0 / block_total);
   }
   fclose(f);
   printf("wrote %s\n", path);

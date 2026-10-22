@@ -4,8 +4,9 @@
 Decodes the blocks written by the C++ tool with a decoder from another project ("texture2ddecoder", which implements
 the format as the hardware does) and reports how close the result is to the source: PSNR per channel, plus the alpha
 channel for the RGBA image. The images are deliberately different things: a smooth gradient (over 30 dB: the format
-handles those well), UI art with an alpha ramp, and pure noise (low, and expected to be: 4 bits per pixel). The floors
-below are this encoder's own measured numbers, so the check is a regression guard, not a quality target.
+handles those well), UI art with an alpha ramp, pure noise (low, and expected to be: 4 bits per pixel), and shaded art
+with a little dither - the closest of them to the game's own textures. The floors below are this encoder's own measured
+numbers, so the check is a regression guard, not a quality target.
 
     pip install texture2ddecoder
     python3 tools/android/etc2_check.py blocks.bin
@@ -75,7 +76,8 @@ def main(path):
         # Regression floors, not targets: this encoder is deliberately smaller and simpler than etcpak's, and these
         # are its measured numbers on these three images (with a little room for encoder tweaks). A layout or search
         # bug shows up immediately - a broken encoder scores under 12 dB on all of them.
-        floor_rgb, floor_a = (32.0, 99.0) if i == 0 else (9.0, 10.0) if i == 1 else (8.0, 99.0)
+        floors = {0: (32.0, 99.0), 1: (9.0, 10.0), 3: (30.0, 99.0)}   # 3: the shaded image, photo-like art
+        floor_rgb, floor_a = floors.get(i, (8.0, 99.0))
         if rgb < floor_rgb or (kind == "rgba" and a < floor_a):
             ok = False
     print("OK" if ok else "FAILED (below the regression floors)")
