@@ -10,8 +10,11 @@
 - **Diagnostics for a black or missing world, on the phone itself**: the overlay counts world (3D) and HUD (2D) draws
   per second - a picture that keeps drawing is a different problem from a stage that submits nothing - plus two switches
   ("Draw both sides", "Ignore the depth buffer") that build new pipelines immediately, so culling and depth can be ruled
-  in or out with a tap instead of a rebuild. "Show log on the screen" draws the tail of the log over the game with any
-  error lines pinned in red at the top, which is how a renderer error becomes a screenshot instead of a report.
+  in or out with a tap instead of a rebuild. Those two come with "Skip full-screen copies" and "Hide haze copies", which
+  drop the game's 2D copy of the screen and its haze pass - the two things that draw *over* a finished world, so a world
+  that is hidden rather than missing shows up the moment one of them is on. "Show log on the screen" draws the tail of the
+  log over the game with any error lines pinned in red at the top, which is how a renderer error becomes a screenshot
+  instead of a report.
 
 **Android (new)**
 - A 64-bit Android port: one APK for arm64 phones, a launcher that imports your own disc image and picks a graphics

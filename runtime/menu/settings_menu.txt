@@ -135,6 +135,8 @@ Cheats|dark_gauge|Dark gauge|live:0:30000:30000|0|Fill the Dark gauge now: 0 to 
 System|debug_no_cull|Draw both sides (diagnostics)|bool|0|Draws the back of every surface too. If a missing world appears with this on, culling was hiding it.
 System|debug_no_depth|Ignore the depth buffer (diagnostics)|bool|0|Everything draws on top of everything: if the world appears, the depth buffer was hiding it.
 System|show_log|Show log on the screen|bool|0|The last lines of the log over the game, errors in red. Screenshot it when something looks wrong.
+System|debug_no_restore|Skip full-screen copies (diagnostics)|bool|0|Drops the game's 2D draws of the screen copy. If the world appears, one of those copies covered it.
+System|debug_no_haze|Hide haze copies (diagnostics)|bool|0|Drops the world-pass draws that sample a screen copy. If the picture clears up, that draw is the one.
 System|bug_key|Bug report key|bool|0|F12, or Back + Start on a pad, saves a bug report (picture and game state) in the bugs folder.
 ## Game
 System||Restart the game|action:restart|0|Settings tagged "after restart" take effect after it.

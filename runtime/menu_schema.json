@@ -176,6 +176,8 @@
         {"key": "debug_no_cull", "kind": "toggle", "label": "Draw both sides (diagnostics)", "help": "Draws the back of every surface too. If a missing world appears with this on, culling was hiding it.", "default": 0, "store": "ini", "restart": "none"},
         {"key": "debug_no_depth", "kind": "toggle", "label": "Ignore the depth buffer (diagnostics)", "help": "Everything draws on top of everything: if the world appears, the depth buffer was hiding it.", "default": 0, "store": "ini", "restart": "none"},
         {"key": "show_log", "kind": "toggle", "label": "Show log on the screen", "help": "The last lines of the log over the game, errors in red. Screenshot it when something looks wrong.", "default": 0, "store": "ini", "restart": "none"},
+        {"key": "debug_no_restore", "kind": "toggle", "label": "Skip full-screen copies (diagnostics)", "help": "Drops the game's 2D draws of the screen copy. If the world appears, one of those copies covered it.", "default": 0, "store": "ini", "restart": "none"},
+        {"key": "debug_no_haze", "kind": "toggle", "label": "Hide haze copies (diagnostics)", "help": "Drops the world-pass draws that sample a screen copy. If the picture clears up, that draw is the one.", "default": 0, "store": "ini", "restart": "none"},
         {"key": "bug_key", "kind": "toggle", "label": "Bug report key", "help": "F12, or Back + Start on a pad, saves a bug report (picture and game state) in the bugs folder.", "default": 0, "store": "ini", "restart": "none"}
       ]}
     ]}

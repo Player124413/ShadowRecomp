@@ -1269,10 +1269,11 @@ static size_t parse_command(const uint8_t* p, size_t avail, bool in_dl) {
                  (int)st.vtxDesc[GX_VA_CLR0], vs, count);
         }
       }
-      static const bool no_haze = getenv("WS_NO_HAZE") != nullptr;   // experiment: hide 3D draws sampling an EFB copy
-      if (no_haze && g_map0_copy_tex && !g_proj_ortho) return total;
-      static const bool no_restore = getenv("WS_NO_RESTORE") != nullptr;   // experiment: skip 2D draws of 640x480 copies
-      if (no_restore && g_map0_copy_tex && g_proj_ortho) {
+      // WS_NO_HAZE / WS_NO_RESTORE were experiments; Settings > System > Bug reports now exposes both on the phone.
+      static const bool env_no_haze = getenv("WS_NO_HAZE") != nullptr;   // hide 3D draws sampling an EFB copy
+      if ((env_no_haze || settings::g.debug_no_haze) && g_map0_copy_tex && !g_proj_ortho) return total;
+      static const bool env_no_restore = getenv("WS_NO_RESTORE") != nullptr;   // skip 2D draws of 640x480 copies
+      if ((env_no_restore || settings::g.debug_no_restore) && g_map0_copy_tex && g_proj_ortho) {
         auto it = g_copy_dests.find(g_map0_copy_tex);
         if (it != g_copy_dests.end() && (it->second >> 16) >= 600) return total;
       }

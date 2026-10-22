@@ -226,6 +226,8 @@ static bool set_key(const char* key, int v) {
   else if (!strcmp(key, "fps_target")) g.fps_target = v;
   else if (!strcmp(key, "show_fps")) g.show_fps = v != 0;
   else if (!strcmp(key, "show_log")) g.show_log = v != 0;
+  else if (!strcmp(key, "debug_no_restore")) g.debug_no_restore = v != 0;
+  else if (!strcmp(key, "debug_no_haze")) g.debug_no_haze = v != 0;
   else if (!strcmp(key, "debug_no_cull")) g.debug_no_cull = v != 0;
   else if (!strcmp(key, "debug_no_depth")) g.debug_no_depth = v != 0;
   else if (!strcmp(key, "dynamic_resolution")) g.dynamic_resolution = v != 0;
@@ -370,9 +372,9 @@ void cycle_movement_preset() {
 void save() {
   FILE* f = fopen(ini_path().c_str(), "w");
   if (!f) return;
-  fprintf(f, "width=%d\nheight=%d\nwidescreen=%d\nfullscreen=%d\nfps_target=%d\nshow_fps=%d\nshow_log=%d\ndebug_no_cull=%d\ndebug_no_depth=%d\ngame_bloom=%d\n",
+  fprintf(f, "width=%d\nheight=%d\nwidescreen=%d\nfullscreen=%d\nfps_target=%d\nshow_fps=%d\nshow_log=%d\ndebug_no_cull=%d\ndebug_no_depth=%d\ndebug_no_restore=%d\ndebug_no_haze=%d\ngame_bloom=%d\n",
           g.width, g.height, (int)g.widescreen, (int)g.fullscreen, g.fps_target, (int)g.show_fps, (int)g.show_log,
-          (int)g.debug_no_cull, (int)g.debug_no_depth, (int)g.game_bloom);
+          (int)g.debug_no_cull, (int)g.debug_no_depth, (int)g.debug_no_restore, (int)g.debug_no_haze, (int)g.game_bloom);
   fprintf(f, "dynamic_resolution=%d\nsettings_version=%d\ncompressed_textures=%d\nrender_backend=%d\n",
           (int)g.dynamic_resolution, kSettingsVersion, g.compressed_textures, g.render_backend);
   fprintf(f, "clip_ui_43=%d\ncutscene_bars=%d\nskip_any_cutscene=%d\nhud_169=%d\nwarp_enemy_counts=%d\n", (int)g.clip_ui_43, (int)g.cutscene_bars,

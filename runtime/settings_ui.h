@@ -13,6 +13,8 @@ struct Values {
   bool show_fps = false;
   bool debug_no_cull = false;    // diagnostics: draw both sides of every triangle
   bool debug_no_depth = false;   // diagnostics: ignore the depth buffer
+  bool debug_no_restore = false;    // diagnostics: drop the game's 2D draws of a full-screen EFB copy
+  bool debug_no_haze = false;       // diagnostics: drop the world-pass draws that sample an EFB copy (haze)
   bool show_log = false;    // draw the last lines of the log over the game (a phone has no console: a screenshot of it is
                             // what a "the world is black" report needs)
   // Adaptive render resolution (dynamic_resolution.cpp): on a phone it is on unless the ini says otherwise; on a

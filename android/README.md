@@ -210,6 +210,9 @@ A phone has no console, so the port answers questions with the screen instead:
     is a bug report we can act on.
   * **Draw both sides** and **Ignore the depth buffer** rebuild the pipelines with culling off / the depth test off. If
     the missing world appears with either one, that is which part of the renderer is at fault, and it takes one tap.
+  * **Skip full-screen copies** and **Hide haze copies** drop the two things the game draws on top of a finished world
+    (its 2D copy of the screen, and the haze pass that samples one). A world that is being covered rather than not drawn
+    appears as soon as one of them is on - that tells us the copy, not the geometry, is the broken part.
   * The overlay also counts **3D draws per second** (the world) against **2D draws per second** (the HUD): a stage that
     is drawing thousands of world triangles and showing black has a different cause from one that submits none.
 
