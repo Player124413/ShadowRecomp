@@ -2,9 +2,12 @@
 #include "etc2_transcode.hpp"
 
 #include <algorithm>
+#include <atomic>
+#include <chrono>
 #include <cstdlib>
 
 #include "etc2_encode.hpp"
+#include "upload_churn.hpp"
 #include "../internal.hpp"
 #include "../webgpu/gpu.hpp"
 
@@ -14,39 +17,75 @@ Module Log{"aurora::etc2"};
 
 enum class Mode { Off, CompressedSourcesOnly, Everything };
 
+std::atomic<int> g_enabled{0};   // settings::g.compressed_textures: 0 auto, 1 off, 2 everything
+
 Mode mode() {
-  static const Mode m = [] {
-    const char* v = getenv("SHADOW_ETC2");
-    if (v != nullptr && (*v == '0' || *v == 'f' || *v == 'F')) return Mode::Off;
-    if (v != nullptr && (*v == '1' || *v == 'a' || *v == 'A' || *v == 't' || *v == 'T')) return Mode::Everything;
+  static const Mode platform_default = [] {
 #if defined(__ANDROID__)
     return Mode::CompressedSourcesOnly;   // the phone: the biggest win for no new loss (CMPR is already lossy)
 #else
     return Mode::Off;                     // the desktop uploads BC1 directly; nothing to gain
 #endif
   }();
+  static bool logged = false;
+  Mode m = platform_default;
+  if (const char* v = getenv("SHADOW_ETC2")) {
+    if (*v == '0' || *v == 'f' || *v == 'F') m = Mode::Off;
+    else if (*v == '1' || *v == 'a' || *v == 'A' || *v == 't' || *v == 'T') m = Mode::Everything;
+  } else {
+    switch (g_enabled.load(std::memory_order_relaxed)) {
+    case 1: m = Mode::Off; break;
+    case 2: m = Mode::Everything; break;
+    default: break;
+    }
+  }
+  if (!logged) {
+    logged = true;
+    const char* name = m == Mode::Off ? "off" : m == Mode::Everything ? "on (every RGB source)" : "on (CMPR only)";
+    Log.info("textures: ETC2 {}; the GPU reports ETC2 textures: {}", name,
+             webgpu::g_etc2TexturesSupported ? "yes" : "no");
+  }
   return m;
 }
 
 uint64_t g_before = 0;   // texture bytes the game handed us (RGBA8)
 uint64_t g_after = 0;    // and what they became
 uint64_t g_textures = 0;
+
+// Per-frame uploads: see upload_churn.hpp.
+UploadChurn g_churn;
+
+uint64_t now_ns() {
+  using namespace std::chrono;
+  return uint64_t(duration_cast<nanoseconds>(steady_clock::now().time_since_epoch()).count());
+}
+
+// True when this texture is one of a stream of per-frame uploads (and was counted).
+bool hot(uint32_t width, uint32_t height, uint32_t mips) {
+  bool became = false;
+  const bool is_hot = g_churn.hot(width, height, mips, now_ns(), &became);
+  if (became) Log.info("ETC2: {}x{} is re-uploaded every frame - keeping it uncompressed", width, height);
+  return is_hot;
+}
 }  // namespace
 
-bool wants(u32 gxFormat) {
+void set_enabled(int mode) { g_enabled.store(mode, std::memory_order_relaxed); }
+
+bool wants(u32 gxFormat, uint32_t width, uint32_t height, uint32_t mips) {
   const Mode m = mode();
   if (m == Mode::Off) return false;
   if (!webgpu::g_etc2TexturesSupported) return false;
   switch (gxFormat) {
   case GX_TF_CMPR:   // block compressed on the console already
-    return true;
+    return !hot(width, height, mips);
   case GX_TF_RGBA8:
   case GX_TF_RGB565:
   case GX_TF_RGB5A3:
   case GX_TF_IA8:
-    return m == Mode::Everything;   // exact on the console: only when the user asks (SHADOW_ETC2=1)
+    // exact on the console: only when the user asks (SHADOW_ETC2=1 or the setting)
+    return m == Mode::Everything && !hot(width, height, mips);
   default:
-    return false;                   // palettes, intensity, alpha-only: not worth the loss
+    return false;   // palettes, intensity, alpha-only: not worth the loss
   }
 }
 
@@ -72,6 +111,14 @@ Result transcode(uint32_t width, uint32_t height, uint32_t mips, ArrayRef<uint8_
   g_after += out.size();
   if ((++g_textures % 64) == 0) log_stats();
   return {.data = std::move(out), .hasAlpha = hasAlpha};
+}
+
+Stats stats() {
+  const Mode m = mode();
+  return {.textures = g_textures,
+          .before = g_before,
+          .after = g_after,
+          .mode = m == Mode::Off ? 0 : m == Mode::CompressedSourcesOnly ? 1 : 2};
 }
 
 void log_stats() {

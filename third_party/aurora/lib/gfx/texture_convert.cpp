@@ -598,7 +598,7 @@ ConvertedTexture convert_texture_to_etc2(wgpu::TextureFormat srcFormat, uint32_t
 ConvertedTexture convert_texture(u32 format, uint32_t width, uint32_t height, uint32_t mips, ArrayRef<uint8_t> data) {
   ZoneScoped;
   ByteBuffer converted;
-  const bool toEtc2 = etc2::wants(format);
+  const bool toEtc2 = etc2::wants(format, width, height, mips);
   switch (format) {
     DEFAULT_FATAL("convert_texture: unknown texture format {}", format);
   case GX_TF_R8_PC:

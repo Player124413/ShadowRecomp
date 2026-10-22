@@ -318,12 +318,25 @@ void write_texture(TextureRef& ref, ArrayRef<uint8_t> data) noexcept {
   ConvertedTexture converted;
   if (ref.gxFormat != InvalidTextureFormat) {
     converted = convert_texture(ref.gxFormat, ref.size.width, ref.size.height, ref.mipCount, data);
-    // The texture already exists with a fixed format: only a conversion that lands in *that* format can be written
-    // into it. (A transcoded ETC2 buffer in an RGBA8 texture is the same bug new_static_texture_2d used to have; here
-    // the uncompressed bytes the caller passed are still valid for the texture, so they are simply used as they are.)
+    // The texture already exists with a fixed format, so the bytes written into it have to be in *that* format. A
+    // conversion that lands somewhere else (the ETC2 encoder deciding this texture is a per-frame upload, so it stayed
+    // RGBA8) leaves two cases: the caller's own bytes already are what the texture holds, or the write cannot be done
+    // at all. Writing CMPR blocks into a decoded RGBA8 texture - or ETC2 into either - is what turns the world black,
+    // and a release build cannot recover from it (CHECK() is compiled out), so refuse instead.
     if (!converted.data.empty() && converted.format == ref.format) {
       data = converted.data;
       ref.hasArbitraryMips = converted.hasArbitraryMips;
+    } else if (uses_direct_texture_upload(ref.gxFormat) && to_wgpu(ref.gxFormat) == ref.format) {
+      // nothing to convert: the caller's bytes are already in the texture's format
+    } else {
+      static bool reported = false;
+      if (!reported) {
+        reported = true;
+        Log.error("write_texture: cannot write a {}x{} texture as format {} (GX format {}); skipping the upload",
+                  ref.size.width, ref.size.height, static_cast<uint32_t>(ref.format),
+                  static_cast<uint32_t>(ref.gxFormat));
+      }
+      return;
     }
   }
 
