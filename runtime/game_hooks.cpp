@@ -34,6 +34,15 @@ uint64_t g_evmgr_start_ns = 0;
 
 extern uint64_t g_last_movie_read_ns;   // hw.cpp: last read of a .sfd movie stream
 
+// The touch overlay's SKIP control during an in-engine cutscene, and when it was pressed (see hle_EventUpdate below).
+bool g_skip_scene_request = false;
+static uint64_t s_skip_scene_ns = 0;
+void game::request_scene_skip() {
+  g_skip_scene_request = true;
+  s_skip_scene_ns = sys_time_ns();
+  logf("[skip] SKIP pressed during an in-engine cutscene\n");
+}
+
 namespace game {
 // Story cutscenes in this game are played by the in-stage event player (fn_80173034; e.g. Black Doom's scenes run in
 // their own small "event stage", stg0005): state 1-4 load/fade in, 5 = playing, 6-8 wrap up. The StageSequence
@@ -374,11 +383,17 @@ void hle_EventUpdate(Cpu& c) {
   if (g_evmgr_state == 5 && prev_state != 5) { playing_since = g_evmgr_last_ns; input_take_start_press(); }   // drop older presses
   // "Skip any cutscene": START during playback requests the game's own skip (+0x34), which it otherwise only
   // accepts for scenes already seen.
-  if (g_evmgr_state == 5 && g_evmgr_last_ns - playing_since > 500000000ull && input_take_start_press() &&
-      settings::g.skip_any_cutscene && !ld8(self + 0x34)) {
+  const bool scene_on_screen = g_evmgr_state == 5 && g_evmgr_last_ns - playing_since > 500000000ull;
+  const bool by_control = g_skip_scene_request;
+  if (scene_on_screen && (by_control || (input_take_start_press() && settings::g.skip_any_cutscene)) &&
+      !ld8(self + 0x34)) {
+    // by_control comes from the touch overlay's SKIP control: no option and no START press needed.
+    if (by_control) g_skip_scene_request = false;
     st8(self + 0x34, 1);
-    logf("[game] cutscene skipped (skip-any option)\n");
+    logf("[game] cutscene skipped (%s)\n", by_control ? "skip control" : "skip-any option");
   }
+  // a request made while the scene was still fading in waits a moment instead of being lost for good
+  if (g_skip_scene_request && sys_time_ns() - s_skip_scene_ns > 3000000000ull) g_skip_scene_request = false;
   if (g_event_trace) {
     static uint32_t last_self = 0, last_state = ~0u, last_id = ~0u;
     static uint8_t last_skip = 0xFF;

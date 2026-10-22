@@ -38,6 +38,9 @@ extern bool g_boot_story;             // --story: boot straight into the save's 
 extern int g_boot_stage;              // --stage N (tests): boot straight into stage N (game_hooks.cpp)
 extern bool g_play_stage;             // --play-stage N: the same start for players (saves written, no auto-press) (main.cpp)
 extern bool g_skip_movies;            // auto-tap START while a movie (.sfd) is being streamed
+// The touch overlay's SKIP control was pressed during an in-engine cutscene (game_hooks.cpp acts on it once; it does
+// not depend on the "Skip any cutscene" option, since a control labelled SKIP is an explicit request).
+extern bool g_skip_scene_request;
 extern uint64_t g_last_movie_read_ns;   // returns false if out of range
 
 // hardware

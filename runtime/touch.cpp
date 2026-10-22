@@ -16,6 +16,7 @@
 #include "input.h"
 #include "settings_ui.h"
 #include "gx_lle.h"
+#include "game.h"
 #include <imgui.h>
 #include <SDL3/SDL.h>
 #include <algorithm>
@@ -80,6 +81,12 @@ bool movie_showing() {
   return g_last_movie_read_ns != 0 && sys_time_ns() - g_last_movie_read_ns < 1000000000ull;
 }
 
+// Anything that takes the picture away from the player: a pre-rendered movie, or an in-engine story scene (the event
+// player). Both get the SKIP control, and both answer it - the movie by jumping its stream to the tail (hw.cpp), the
+// in-engine scene through the game's own skip flag (game_hooks.cpp), which otherwise only happens for scenes already
+// seen.
+bool cutscene_showing() { return movie_showing() || game::cutscene_active(); }
+
 // The SKIP control, in screen fractions: one rectangle for drawing and for the hit test, so a thumb lands on what it
 // sees. Bottom centre, out of the way of the pad and of the game's own HUD (it lives at the top of the screen).
 constexpr float kSkipCx = 0.5f, kSkipCy = 0.865f, kSkipHx = 0.115f, kSkipHy = 0.062f;
@@ -95,6 +102,15 @@ void request_movie_skip() {
   g_movie_skip_for = g_movie_start_ns;
   g_movie_skip_ns = sys_time_ns();
   logf("[skip] SKIP pressed on the touch overlay\n");
+}
+
+// The player pressed SKIP: whichever kind of cutscene is on screen, ask for it to end.
+void request_cutscene_skip() {
+  if (movie_showing()) {
+    request_movie_skip();
+  } else {
+    game::request_scene_skip();
+  }
 }
 
 Visual& visual_for(int id) {
@@ -309,9 +325,9 @@ bool release(Held& h) {
 }
 
 void finger_down(SDL_FingerID id, float x, float y) {
-  if (movie_showing() && !g_editor && skip_button_at(x, y)) {   // before the pad: a movie is playing and this is
-                                                                 // the one control
-    request_movie_skip();
+  if (cutscene_showing() && !g_editor && skip_button_at(x, y)) {   // before the pad: a cutscene is playing and this is
+                                                                   // the one control that matters
+    request_cutscene_skip();
     buzz(0.5f);
     return;
   }
@@ -573,8 +589,9 @@ void draw_layer(bool editing) {
     draw_widget(dl, w, look, centre, r, visual_for(w0.id).press, w0.id == g_selected, editing);
   }
 
-  // A movie is playing: say how to get past it. Drawn over everything else, in the one place nothing else lives.
-  if (!editing && movie_showing()) {
+  // A cutscene (movie or in-engine) is playing: say how to get past it. Drawn over everything else, in the one place
+  // nothing else lives.
+  if (!editing && cutscene_showing()) {
     const ImVec2 c(kSkipCx * screen.x, kSkipCy * screen.y);
     const ImVec2 half(kSkipHx * screen.x, kSkipHy * screen.y);
     const float r = std::min(half.x, half.y);
