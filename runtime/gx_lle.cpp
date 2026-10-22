@@ -28,6 +28,7 @@ namespace first_boot_hint { void frame(); }   // first_boot_hint.cpp (#155)
 #include "gx/gx.hpp"
 #include "gx/command_processor.hpp"
 #include "gfx/etc2_transcode.hpp"
+#include "webgpu/gpu.hpp"
 #include "window.hpp"
 
 #include <cstring>
@@ -70,7 +71,7 @@ struct TlutLoad { uint32_t mem = 0; uint32_t entries = 0; int slot = -1; };
 static std::map<uint32_t, TlutLoad> g_tlut_by_offset;   // tmem offset -> load
 static int g_next_tlut_slot = 0;
 static uint32_t g_tlut_mem = 0;                     // BP 0x64
-static uint64_t g_stat_cmds = 0, g_stat_draws = 0;
+static uint64_t g_stat_cmds = 0, g_stat_draws = 0, g_stat_draws3d = 0, g_stat_draws2d = 0;
 // The post-processing point (postfx.cpp): between the 3D scene and the HUD. The game draws everything through one
 // render tree, and game_hooks.cpp hud_element_draw tags each of its objects (FIFO markers 0x02/0x03) - the world, the
 // effects AND the HUD. Scene objects draw 3D (perspective); the HUD objects after them draw only 2D (orthographic).
@@ -1315,6 +1316,8 @@ static size_t parse_command(const uint8_t* p, size_t avail, bool in_dl) {
       g_out.insert(g_out.end(), p, p + total);
       run_out();
       ++g_stat_draws;
+      if (g_proj_ortho) ++g_stat_draws2d;   // 2D (the HUD and other orthographic layers)
+      else ++g_stat_draws3d;                // 3D (the world)
       fx_order_draw();
     }
     return total;
@@ -1672,6 +1675,42 @@ void apply_display_settings(bool quiet) {
   }
 }
 double drs_scale() { return drs::scale(); }
+// Settings > System > Bug reports: two switches that bisect "the world is black but the HUD draws" on the phone itself.
+uint64_t draw_count() { return g_stat_draws; }   // diagnostics: are draw commands even reaching the renderer?
+void draw_counts(uint64_t& draws3d, uint64_t& draws2d) {   // split: the world (3D) against the HUD (2D)
+  draws3d = g_stat_draws3d;
+  draws2d = g_stat_draws2d;
+}
+void set_render_debug(bool no_cull, bool no_depth_test) {
+  if (aurora::gx::g_debugNoCull == no_cull && aurora::gx::g_debugNoDepthTest == no_depth_test) return;
+  aurora::gx::g_debugNoCull = no_cull;
+  aurora::gx::g_debugNoDepthTest = no_depth_test;
+  logf("[gx] debug: culling %s, depth test %s\n", no_cull ? "off" : "on", no_depth_test ? "off" : "on");
+}
+// Which renderer the phone chose. Dawn (WebGPU) prefers Vulkan on Android and falls back to OpenGL ES, and the two can
+// differ in what they get wrong - so the answer belongs in every report, not in a guess.
+const char* gpu_backend_name() {
+  switch (aurora::webgpu::g_backendType) {
+  case wgpu::BackendType::Vulkan: return "Vulkan";
+  case wgpu::BackendType::OpenGLES: return "OpenGL ES";
+  case wgpu::BackendType::OpenGL: return "OpenGL";
+  case wgpu::BackendType::Metal: return "Metal";
+  case wgpu::BackendType::D3D12: return "D3D12";
+  case wgpu::BackendType::D3D11: return "D3D11";
+  case wgpu::BackendType::Null: return "Null (nothing is drawn)";
+  default: return "unknown";
+  }
+}
+const char* gpu_adapter_name() {
+  // AdapterInfo::device is a StringView: data is not NUL-terminated, so it cannot be handed to printf as it is.
+  static std::string name;
+  if (name.empty()) {
+    const auto info = aurora::webgpu::g_adapterInfo;
+    if (info.device.data != nullptr) name.assign(info.device.data, info.device.length);
+    if (name.empty()) name = "unknown GPU";
+  }
+  return name.c_str();
+}
 int etc2_mode() { return aurora::gfx::etc2::stats().mode; }
 uint64_t etc2_textures() { return aurora::gfx::etc2::stats().textures; }
 int etc2_saved_percent() {
@@ -1726,6 +1765,24 @@ void init_window() {
   cfg.windowHeight = 960;
   cfg.mem1Size = 0;
   cfg.mem2Size = 0;
+  // Graphics API (Settings > Graphics > "Graphics API"): Android has Vulkan and OpenGL ES; Auto lets Aurora try Vulkan
+  // first and fall back. Forcing one is a diagnostic for a driver that draws the world wrong on one of them.
+  // SHADOW_BACKEND=vulkan|gles does the same without touching the settings file (adb shell, a launcher script, a
+  // desktop shortcut): useful before the menu can be reached at all.
+  int backend_choice = settings::g.render_backend;
+  if (const char* env_backend = getenv("SHADOW_BACKEND")) {
+    if (!strcmp(env_backend, "vulkan")) backend_choice = 1;
+    else if (!strcmp(env_backend, "gles") || !strcmp(env_backend, "opengles")) backend_choice = 2;
+    else if (!strcmp(env_backend, "auto")) backend_choice = 0;
+  }
+  switch (backend_choice) {
+  case 1: cfg.desiredBackend = BACKEND_VULKAN; break;
+  case 2: cfg.desiredBackend = BACKEND_OPENGLES; break;
+  default: cfg.desiredBackend = BACKEND_AUTO; break;
+  }
+  if (cfg.desiredBackend != BACKEND_AUTO) {
+    logf("graphics API: %s (forced by the settings)\n", cfg.desiredBackend == BACKEND_VULKAN ? "Vulkan" : "OpenGL ES");
+  }
   cfg.vsync = false;
   cfg.hdr = settings::g.hdr;                  // HDR output groundwork (Aurora gpu.cpp: FP16 scRGB + output transform)
   cfg.hdrPaperWhiteNits = (float)settings::g.hdr_paper_white;

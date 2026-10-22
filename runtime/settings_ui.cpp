@@ -12,6 +12,7 @@ void custom_stats_tick();   // custom_stats.cpp
 #include "cheats.h"
 #include "input.h"
 #include "game.h"
+#include "log_ring.h"
 #include <map>
 #include "sys.h"
 #include <imgui.h>
@@ -224,6 +225,9 @@ static bool set_key(const char* key, int v) {
   else if (!strcmp(key, "fullscreen")) g.fullscreen = v != 0;
   else if (!strcmp(key, "fps_target")) g.fps_target = v;
   else if (!strcmp(key, "show_fps")) g.show_fps = v != 0;
+  else if (!strcmp(key, "show_log")) g.show_log = v != 0;
+  else if (!strcmp(key, "debug_no_cull")) g.debug_no_cull = v != 0;
+  else if (!strcmp(key, "debug_no_depth")) g.debug_no_depth = v != 0;
   else if (!strcmp(key, "dynamic_resolution")) g.dynamic_resolution = v != 0;
   else if (!strcmp(key, "game_bloom")) g.game_bloom = v != 0;
   else if (!strcmp(key, "clip_ui_43")) g.clip_ui_43 = v != 0;
@@ -233,6 +237,7 @@ static bool set_key(const char* key, int v) {
   else if (!strcmp(key, "gauges_new")) {}   // #143 the PC gauges were removed: old ini lines are ignored
   else if (!strcmp(key, "skip_any_cutscene")) g.skip_any_cutscene = v != 0;
   else if (!strcmp(key, "compressed_textures")) g.compressed_textures = std::clamp(v, 0, 2);
+  else if (!strcmp(key, "render_backend")) g.render_backend = std::clamp(v, 0, 2);
   else if (!strcmp(key, "settings_version")) g.settings_version = v;
   else if (!strcmp(key, "warp_enemy_counts")) g.warp_enemy_counts = v != 0;
   else if (!strcmp(key, "fov_percent")) g.fov_percent = v;
@@ -365,10 +370,11 @@ void cycle_movement_preset() {
 void save() {
   FILE* f = fopen(ini_path().c_str(), "w");
   if (!f) return;
-  fprintf(f, "width=%d\nheight=%d\nwidescreen=%d\nfullscreen=%d\nfps_target=%d\nshow_fps=%d\ngame_bloom=%d\n", g.width, g.height,
-          (int)g.widescreen, (int)g.fullscreen, g.fps_target, (int)g.show_fps, (int)g.game_bloom);
-  fprintf(f, "dynamic_resolution=%d\nsettings_version=%d\ncompressed_textures=%d\n", (int)g.dynamic_resolution,
-          kSettingsVersion, g.compressed_textures);
+  fprintf(f, "width=%d\nheight=%d\nwidescreen=%d\nfullscreen=%d\nfps_target=%d\nshow_fps=%d\nshow_log=%d\ndebug_no_cull=%d\ndebug_no_depth=%d\ngame_bloom=%d\n",
+          g.width, g.height, (int)g.widescreen, (int)g.fullscreen, g.fps_target, (int)g.show_fps, (int)g.show_log,
+          (int)g.debug_no_cull, (int)g.debug_no_depth, (int)g.game_bloom);
+  fprintf(f, "dynamic_resolution=%d\nsettings_version=%d\ncompressed_textures=%d\nrender_backend=%d\n",
+          (int)g.dynamic_resolution, kSettingsVersion, g.compressed_textures, g.render_backend);
   fprintf(f, "clip_ui_43=%d\ncutscene_bars=%d\nskip_any_cutscene=%d\nhud_169=%d\nwarp_enemy_counts=%d\n", (int)g.clip_ui_43, (int)g.cutscene_bars,
           (int)g.skip_any_cutscene, (int)g.hud_169, (int)g.warp_enemy_counts);
   fprintf(f, "fov_percent=%d\ncam_sens=%d\ninvert_cam_x=%d\ninvert_cam_y=%d\n", g.fov_percent, g.cam_sens, (int)g.invert_cam_x,
@@ -481,6 +487,32 @@ int display_refresh_hz() {
   return m && m->refresh_rate > 1 ? (int)(m->refresh_rate + 0.5f) : 60;
 }
 
+// Draw commands per second, for the frame-rate overlay: a stage that submits almost nothing is a different bug from one
+// whose draws the GPU throws away.
+void draws_per_second(double& draws3d, double& draws2d) {
+  static uint64_t last3d = 0, last2d = 0, last_ns = 0;
+  static double rate3d = 0, rate2d = 0;
+  uint64_t d3 = 0, d2 = 0;
+  gxlle::draw_counts(d3, d2);
+  const uint64_t now = sys_time_ns();
+  if (last_ns != 0 && now > last_ns) {
+    const double dt = (double)(now - last_ns) * 1e-9;
+    if (dt >= 0.5) {
+      rate3d = (double)(d3 - last3d) / dt;
+      rate2d = (double)(d2 - last2d) / dt;
+      last3d = d3;
+      last2d = d2;
+      last_ns = now;
+    }
+  } else {
+    last3d = d3;
+    last2d = d2;
+    last_ns = now;
+  }
+  draws3d = rate3d;
+  draws2d = rate2d;
+}
+
 void draw() {
   poll_live();
   if(game::stage_boot_loading()) {
@@ -542,8 +574,18 @@ void draw() {
     ImGui::Text("textures %s   %llu compressed, %d%% less", em == 0 ? "32-bit" : em == 1 ? "ETC2" : "ETC2 (all)",
                 (unsigned long long)gxlle::etc2_textures(), gxlle::etc2_saved_percent());
     ImGui::Text("%s", game::cutscene_active() ? "cutscene" : game::in_stage() ? "stage" : "menus");
+    ImGui::Text("%s - %s", gxlle::gpu_backend_name(), gxlle::gpu_adapter_name());
+    {
+      double d3 = 0, d2 = 0;
+      draws_per_second(d3, d2);
+      // a world that is black while these keep counting is being drawn and then thrown away (see the two diagnostics below)
+      ImGui::Text("draws %.0f/s 3D, %.0f/s 2D", d3, d2);
+    }
+
     ImGui::End();
   }
+  gxlle::set_render_debug(g.debug_no_cull, g.debug_no_depth);   // diagnostics, live
+  log_ring::draw_overlay();   // Settings > System > Bug reports > "Show log on the screen" (a phone has no console)
   {
     extern uint64_t g_view_hint_until;   // F4 lighting view note
     if (sys_time_ns() < g_view_hint_until) {

@@ -10,6 +10,7 @@ Display|fullscreen|Full screen|bool|0|Fill the whole screen. You can also press 
 Display|fps_target|Frame rate|choice:30=30,48=48,60=60,72=72,90=90,100=100,120=120,144=144,165=165,200=200,240=240,300=300,360=360,500=500,0=Unlimited|0|Pictures per second; the game speed stays the same. Unlimited can make sound stutter on slow PCs.
 Display|show_fps|Show frame rate|bool|0|Shows the frame rate in a corner of the screen.
 Display|cutscene_fps_cap|Cutscene smoothness|choice:60=60 (original),0=Same as the game|0|Cutscenes were made for 60. "Same as the game" can make them judder above 60.
+Display|render_backend|Graphics API|choice:0=Auto,1=Vulkan,2=OpenGL ES|2|Auto asks Vulkan, then falls back to OpenGL ES. The overlay shows which one. Restart to apply.
 ## View
 Display|fov_percent|Field of view|int:70:150:5|0|How wide the camera sees. 100% is the original.
 Display|draw_distance|View distance|int:100:400:5|0|How far away the world is drawn. 100% is the original; more can lower the frame rate.
@@ -34,6 +35,7 @@ Display|cutscene_bars|Black bars when needed|bool|0|Bars slide in when the game 
 Display|menu_tint|Menu colours|choice:0=Dark,1=Light|0|This menu in dark or light colours.
 ## Textures
 # Put your textures in textures\Custom next to the game. System page > Extract the game's textures fills textures\Original: copy a picture from there, edit it, keep its file name (with the [tex1_...] part) and put it in Custom.
+Display|compressed_textures|Compressed textures|choice:0=Auto,1=Off (32-bit),2=On (ETC2)|1|World textures in ETC2: 4x less memory than 32-bit. If the world turns black, set it to Off.
 Display|custom_textures|Use my textures|bool|0|Uses your pictures from the textures\Custom folder next to the game. Changes show while you play.
 Display|custom_textures_dir|My textures folder|path|0|Empty means textures\Custom next to the game. You can pick another folder here.
 Display|tex_match|Match original colours|int:0:100:5|0|Moves your textures' colours closer to the original ones. 0% leaves them as they are.
@@ -130,6 +132,9 @@ Cheats|dark_score|Dark points|live:0:9999999:1|0|Change your Dark points now.
 Cheats|hero_gauge|Hero gauge|live:0:30000:30000|0|Fill the Hero gauge now: 0 to 100%.
 Cheats|dark_gauge|Dark gauge|live:0:30000:30000|0|Fill the Dark gauge now: 0 to 100%.
 ## Bug reports
+System|debug_no_cull|Draw both sides (diagnostics)|bool|0|Draws the back of every surface too. If a missing world appears with this on, culling was hiding it.
+System|debug_no_depth|Ignore the depth buffer (diagnostics)|bool|0|Everything draws on top of everything: if the world appears, the depth buffer was hiding it.
+System|show_log|Show log on the screen|bool|0|The last lines of the log over the game, errors in red. Screenshot it when something looks wrong.
 System|bug_key|Bug report key|bool|0|F12, or Back + Start on a pad, saves a bug report (picture and game state) in the bugs folder.
 ## Game
 System||Restart the game|action:restart|0|Settings tagged "after restart" take effect after it.

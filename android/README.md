@@ -190,10 +190,28 @@ The target is a locked 60 fps, so the port is built for it rather than tuned aft
   ETC2 at load time and uploaded at 4 bits per pixel instead of 32, with an EAC alpha block only when the texture has
   alpha (`SHADOW_ETC2=1` forces it for all RGB sources, `=0` turns it off). The APK requires a GLES3 / Vulkan-class
   device, where ETC2 is guaranteed;
-* Dawn renders through Vulkan, libc++ is linked statically, and the audio stream keeps SDL's own device buffering.
+* Dawn renders through Vulkan. Android builds also link Dawn's OpenGL ES backend, and that is the fallback when Vulkan
+  cannot start; Settings > Graphics > "Graphics API" (or `SHADOW_BACKEND=vulkan|gles`) forces one of them, which is the
+  first thing to try when the picture draws wrong on one driver. libc++ is linked statically, and the audio stream keeps
+  SDL's own device buffering.
 
 The launcher's settings travel as command-line arguments (`--disc`, `--perf`, `--render-scale`, `--touch`,
 `--edit-touch`, `--device-info`), so everything the phone does can be replayed on the desktop build verbatim.
+
+## When the picture is wrong: the two diagnostics built in
+
+A phone has no console, so the port answers questions with the screen instead:
+
+* **Settings > Graphics > "Graphics API"**: Auto / Vulkan / OpenGL ES. The frame-rate overlay names the API and the
+  adapter it is actually using (`vulkan - Adreno (TM) 740`, `opengl es - Mali-G78`), so "which one is it" is one glance.
+* **Settings > System > Bug reports**:
+  * **Show log on the screen** draws the tail of the log over the picture, with error lines pinned in red at the top (a
+    refused pipeline, a shader that failed to compile, a texture format the driver does not support). A screenshot of it
+    is a bug report we can act on.
+  * **Draw both sides** and **Ignore the depth buffer** rebuild the pipelines with culling off / the depth test off. If
+    the missing world appears with either one, that is which part of the renderer is at fault, and it takes one tap.
+  * The overlay also counts **3D draws per second** (the world) against **2D draws per second** (the HUD): a stage that
+    is drawing thousands of world triangles and showing black has a different cause from one that submits none.
 
 ## Known limits
 

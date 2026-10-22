@@ -19,6 +19,11 @@ uint64_t xfb_count();          // frames displayed so far (hang watchdog)
 int effective_render_height(); // render height actually in use
 // Diagnostics overlay (settings_ui.cpp): the adaptive resolution's current multiplier and how textures are held.
 double drs_scale();
+uint64_t draw_count();   // GX draw commands submitted so far (diagnostics)
+void draw_counts(uint64_t& draws3d, uint64_t& draws2d);   // the same, split into world (3D) and HUD (2D)
+void set_render_debug(bool no_cull, bool no_depth_test);   // diagnostics: see Display > System > Bug reports
+const char* gpu_backend_name();   // "Vulkan", "OpenGL ES", ... (Dawn/WebGPU, the renderer the device chose)
+const char* gpu_adapter_name();   // the GPU's own name
 int etc2_mode();                // 0 off, 1 compressed sources only (the phone default), 2 every RGB source
 uint64_t etc2_textures();       // textures that went through the encoder
 int etc2_saved_percent();       // how much smaller the texture data became, %

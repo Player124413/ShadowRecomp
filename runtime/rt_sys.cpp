@@ -1,9 +1,11 @@
 // Safe points, exceptions, SPRs and misc system glue.
 #include "sys.h"
+#include "log_ring.h"
 #include "hw.h"
 #include "rt_sched.h"
 #include "gx_lle.h"
 #include <cstdarg>
+#include <cstdio>
 #include <cstdlib>
 #include <unordered_map>
 #include "plat.h"
@@ -55,8 +57,13 @@ HookFn sys_find_hook(uint32_t addr) {
 void logf(const char* fmt, ...) {
   va_list ap;
   va_start(ap, fmt);
-  vfprintf(stderr, fmt, ap);
+  char buf[2048];
+  const int n = vsnprintf(buf, sizeof buf, fmt, ap);
   va_end(ap);
+  if (n > 0) {
+    fwrite(buf, 1, (size_t)n < sizeof buf ? (size_t)n : sizeof buf - 1, stderr);
+    log_ring::add(buf, (size_t)n < sizeof buf ? (size_t)n : sizeof buf - 1);   // also for the on-screen log
+  }
   fflush(stderr);
 }
 

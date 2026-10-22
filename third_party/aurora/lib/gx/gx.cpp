@@ -31,6 +31,11 @@ using webgpu::g_graphicsConfig;
 GXState g_gxState{};
 wgpu::BindGroup g_emptyTextureBindGroup;
 
+// Diagnostics (see gx.hpp). At namespace scope on purpose: inside the anonymous namespace below they would have
+// internal linkage and the extern declarations in the header would not find them.
+bool g_debugNoCull = false;
+bool g_debugNoDepthTest = false;
+
 namespace {
 wgpu::Sampler sEmptySampler;
 wgpu::Texture sEmptyTexture;
@@ -205,7 +210,7 @@ wgpu::ColorWriteMask to_write_mask(bool colorUpdate, bool alphaUpdate) {
   return writeMask;
 }
 
-wgpu::PrimitiveState to_primitive_state(GXCullMode gx_cullMode) {
+wgpu::PrimitiveState to_primitive_state(GXCullMode gx_cullMode, bool debug_no_cull) {
   auto cullMode = wgpu::CullMode::None;
   switch (gx_cullMode) {
     DEFAULT_FATAL("unsupported cull mode {}", underlying(gx_cullMode));
@@ -217,6 +222,9 @@ wgpu::PrimitiveState to_primitive_state(GXCullMode gx_cullMode) {
     break;
   case GX_CULL_NONE:
     break;
+  }
+  if (debug_no_cull) {
+    cullMode = wgpu::CullMode::None;
   }
   return {
       .topology = wgpu::PrimitiveTopology::TriangleList,
@@ -404,7 +412,7 @@ wgpu::RenderPipeline build_pipeline(const PipelineConfig& config, const gfx::Ren
         .label = label,
         .layout = sLightPipelineLayout,
         .vertex = {.module = shader, .entryPoint = "vs_main"},
-        .primitive = to_primitive_state(GX_CULL_NONE),
+        .primitive = to_primitive_state(GX_CULL_NONE, false),
         .depthStencil = &lightDepth,
         .multisample = wgpu::MultisampleState{.count = 1},
         .fragment = config.shaderConfig.lightPass == 2 ? &lightFragment : nullptr,
@@ -413,8 +421,10 @@ wgpu::RenderPipeline build_pipeline(const PipelineConfig& config, const gfx::Ren
   }
   const wgpu::DepthStencilState depthStencil{
       .format = layout.depthStencilFormat,
-      .depthWriteEnabled = writesDepth,
-      .depthCompare = config.depthCompare ? to_compare_function(config.depthFunc) : wgpu::CompareFunction::Always,
+      .depthWriteEnabled = config.debugNoDepthTest ? false : writesDepth,
+      .depthCompare = config.debugNoDepthTest      ? wgpu::CompareFunction::Always
+                      : config.depthCompare        ? to_compare_function(config.depthFunc)
+                                                   : wgpu::CompareFunction::Always,
       .depthBias = round_away_from_zero<int32_t>(depthBias),
       .depthBiasSlopeScale = depthBiasSlopeScale,
       .depthBiasClamp = depthBiasClamp,
@@ -448,7 +458,7 @@ wgpu::RenderPipeline build_pipeline(const PipelineConfig& config, const gfx::Ren
               .bufferCount = static_cast<uint32_t>(vtxBuffers.size()),
               .buffers = vtxBuffers.data(),
           },
-      .primitive = to_primitive_state(config.cullMode),
+      .primitive = to_primitive_state(config.cullMode, config.debugNoCull),
       .depthStencil = layout.depthStencilFormat != wgpu::TextureFormat::Undefined ? &depthStencil : nullptr,
       .multisample = wgpu::MultisampleState{.count = layout.sampleCount},
       .fragment = &fragmentState,
@@ -571,6 +581,8 @@ void populate_pipeline_config(PipelineConfig& config, GXPrimitive primitive, GXV
       .depthUpdate = g_gxState.depthUpdate,
       .alphaUpdate = alphaUpdate,
       .colorUpdate = g_gxState.colorUpdate,
+      .debugNoCull = g_debugNoCull,
+      .debugNoDepthTest = g_debugNoDepthTest,
   };
 }
 

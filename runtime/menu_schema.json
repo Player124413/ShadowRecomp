@@ -12,7 +12,8 @@
         {"key": "fullscreen", "kind": "toggle", "label": "Full screen", "help": "Fill the whole screen. You can also press F11 or Alt+Enter.", "default": 0, "store": "ini", "restart": "none"},
         {"key": "fps_target", "kind": "fps", "label": "Frame rate", "help": "Pictures per second; the game speed stays the same. Unlimited can make sound stutter on slow PCs.", "default": 60, "options": [["30", 30], ["48", 48], ["60", 60], ["72", 72], ["90", 90], ["100", 100], ["120", 120], ["144", 144], ["165", 165], ["200", 200], ["240", 240], ["300", 300], ["360", 360], ["500", 500], ["Unlimited", 0]], "store": "ini", "restart": "none"},
         {"key": "show_fps", "kind": "toggle", "label": "Show frame rate", "help": "Shows the frame rate in a corner of the screen.", "default": 0, "store": "ini", "restart": "none"},
-        {"key": "cutscene_fps_cap", "kind": "choice", "label": "Cutscene smoothness", "help": "Cutscenes were made for 60. \"Same as the game\" can make them judder above 60.", "options": [["60 (original)", 60], ["Same as the game", 0]], "default": 60, "store": "ini", "restart": "none"}
+        {"key": "cutscene_fps_cap", "kind": "choice", "label": "Cutscene smoothness", "help": "Cutscenes were made for 60. \"Same as the game\" can make them judder above 60.", "options": [["60 (original)", 60], ["Same as the game", 0]], "default": 60, "store": "ini", "restart": "none"},
+        {"key": "render_backend", "kind": "choice", "label": "Graphics API", "help": "Auto asks Vulkan, then falls back to OpenGL ES. The overlay shows which one. Restart to apply.", "options": [["Auto", 0], ["Vulkan", 1], ["OpenGL ES", 2]], "default": 0, "store": "ini", "restart": "game"}
       ]},
       {"title": "View", "items": [
         {"key": "fov_percent", "kind": "slider", "label": "Field of view", "help": "How wide the camera sees. 100% is the original.", "lo": 70, "hi": 150, "fmt": "%d%%", "default": 100, "store": "ini", "restart": "none"},
@@ -41,6 +42,7 @@
         {"key": "menu_tint", "kind": "choice", "label": "Menu colours", "help": "This menu in dark or light colours.", "options": [["Dark", 0], ["Light", 1]], "default": 0, "store": "ini", "restart": "none"}
       ]},
       {"title": "Textures", "note": "Put your textures in textures\\Custom next to the game. System page > Extract the game's textures fills textures\\Original: copy a picture from there, edit it, keep its file name (with the [tex1_...] part) and put it in Custom.", "items": [
+        {"key": "compressed_textures", "kind": "choice", "label": "Compressed textures", "help": "World textures in ETC2: 4x less memory than 32-bit. If the world turns black, set it to Off.", "options": [["Auto", 0], ["Off (32-bit)", 1], ["On (ETC2)", 2]], "default": 0, "store": "ini", "restart": "stage"},
         {"key": "custom_textures", "kind": "toggle", "label": "Use my textures", "help": "Uses your pictures from the textures\\Custom folder next to the game. Changes show while you play.", "default": 0, "store": "ini", "restart": "none"},
         {"key": "custom_textures_dir", "kind": "path", "label": "My textures folder", "help": "Empty means textures\\Custom next to the game. You can pick another folder here.", "default": "", "shown_if": "custom_textures", "store": "ini", "restart": "none"},
         {"key": "tex_match", "kind": "slider", "label": "Match original colours", "help": "Moves your textures' colours closer to the original ones. 0% leaves them as they are.", "lo": 0, "hi": 100, "fmt": "%d%%", "default": 0, "shown_if": "custom_textures", "store": "ini", "restart": "none"}
@@ -103,7 +105,8 @@
         {"key": "mute_background", "kind": "toggle", "label": "Mute when in the background", "help": "No sound while the game window is not in front or is minimised.", "default": 0, "store": "ini", "restart": "none"}
       ]}
     ]},
-    {"id": "controls", "title": "Controls", "sections": []},
+    {"id": "controls", "title": "Controls", "sections": [
+    ]},
     {"id": "qol", "title": "Quality of life", "sections": [
       {"title": "Stages", "note": "Small helpers, all off by default. They work only with Display > View > Original game logic off.", "items": [
         {"key": "warp_enemy_counts", "kind": "toggle", "label": "Enemies left on the warp screen", "help": "Shows how many mission enemies are left near each checkpoint.", "default": 0, "store": "ini", "restart": "none"}
@@ -170,6 +173,9 @@
     ]},
     {"id": "system", "title": "System", "sections": [
       {"title": "Bug reports", "items": [
+        {"key": "debug_no_cull", "kind": "toggle", "label": "Draw both sides (diagnostics)", "help": "Draws the back of every surface too. If a missing world appears with this on, culling was hiding it.", "default": 0, "store": "ini", "restart": "none"},
+        {"key": "debug_no_depth", "kind": "toggle", "label": "Ignore the depth buffer (diagnostics)", "help": "Everything draws on top of everything: if the world appears, the depth buffer was hiding it.", "default": 0, "store": "ini", "restart": "none"},
+        {"key": "show_log", "kind": "toggle", "label": "Show log on the screen", "help": "The last lines of the log over the game, errors in red. Screenshot it when something looks wrong.", "default": 0, "store": "ini", "restart": "none"},
         {"key": "bug_key", "kind": "toggle", "label": "Bug report key", "help": "F12, or Back + Start on a pad, saves a bug report (picture and game state) in the bugs folder.", "default": 0, "store": "ini", "restart": "none"}
       ]}
     ]}

@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+- **Graphics API is now a setting: Auto (Vulkan, then OpenGL ES), Vulkan, or OpenGL ES** (Settings > Graphics >
+  "Graphics API", `SHADOW_BACKEND=vulkan|gles` for a script). The port asks Dawn for Vulkan on Android and only falls
+  back to OpenGL ES if Vulkan refuses to start, so a driver bug in one of them looks like a driver bug in "the game" -
+  now one tap on the other API says which. The frame-rate overlay names the API and the adapter in use (that answer used
+  to be three log lines deep).
+- **Diagnostics for a black or missing world, on the phone itself**: the overlay counts world (3D) and HUD (2D) draws
+  per second - a picture that keeps drawing is a different problem from a stage that submits nothing - plus two switches
+  ("Draw both sides", "Ignore the depth buffer") that build new pipelines immediately, so culling and depth can be ruled
+  in or out with a tap instead of a rebuild. "Show log on the screen" draws the tail of the log over the game with any
+  error lines pinned in red at the top, which is how a renderer error becomes a screenshot instead of a report.
+
 **Android (new)**
 - A 64-bit Android port: one APK for arm64 phones, a launcher that imports your own disc image and picks a graphics
   tier, and touch controls you edit on top of the running picture (drag, resize, opacity, rebind, presets, your own

@@ -19,7 +19,7 @@ struct DrawData {
   uint32_t dstAlpha;
 };
 
-constexpr uint32_t GXPipelineConfigVersion = 13;
+constexpr uint32_t GXPipelineConfigVersion = 14;   // 14: the two render diagnostics below
 struct PipelineConfig {
   uint32_t version = GXPipelineConfigVersion;
   uint32_t msaaSamples = 1; // deprecated
@@ -34,6 +34,9 @@ struct PipelineConfig {
   uint32_t polygonOffsetScaleBits;
   uint32_t polygonOffsetClampBits;
   bool depthCompare, depthUpdate, alphaUpdate, colorUpdate;
+  // Diagnostics (Settings > System > Bug reports): part of the key on purpose, so flipping one builds new pipelines at
+  // once instead of reusing the ones already cached from before the flip.
+  bool debugNoCull, debugNoDepthTest;
 };
 static_assert(std::has_unique_object_representations_v<PipelineConfig>);
 

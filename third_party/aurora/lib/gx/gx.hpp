@@ -49,6 +49,11 @@ constexpr bool EnableNormalVisualization = false;
 constexpr bool EnableDebugPrints = false;
 constexpr bool UsePerPixelLighting = false;
 constexpr bool UseReversedZ = true;
+// Diagnostics (ShadowRecomp: Settings > System > Bug reports). "The world is black but the HUD is fine" is either the
+// geometry being culled or the depth test throwing it away, and on a phone there is no debugger to ask: these two let
+// the player flip one of them and look, which is one tap instead of one round trip.
+extern bool g_debugNoCull;      // draw both sides of every triangle
+extern bool g_debugNoDepthTest; // ignore the depth buffer (everything draws, nothing is hidden)
 
 constexpr u32 MaxTextures = GX_MAX_TEXMAP;
 constexpr u32 MaxTluts = 20;

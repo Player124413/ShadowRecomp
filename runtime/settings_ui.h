@@ -11,6 +11,10 @@ struct Values {
   int fps_target = 60;      // game frame rate: 60 = original pacing, N = run the game at N fps, 0 = unlimited
   int cutscene_fps_cap = 60;  // #122: frame rate while a cutscene plays (they animate in 1/60 s steps); 0 = no cap
   bool show_fps = false;
+  bool debug_no_cull = false;    // diagnostics: draw both sides of every triangle
+  bool debug_no_depth = false;   // diagnostics: ignore the depth buffer
+  bool show_log = false;    // draw the last lines of the log over the game (a phone has no console: a screenshot of it is
+                            // what a "the world is black" report needs)
   // Adaptive render resolution (dynamic_resolution.cpp): on a phone it is on unless the ini says otherwise; on a
   // desktop it is opt-in, because a desktop that misses 60 Hz usually wants to know rather than to get a softer picture.
   bool dynamic_resolution = false;
@@ -22,6 +26,10 @@ struct Values {
   bool gauges_new = false;  // #143: the PC gauges were removed; always false (field kept until the menu schema drops it)
   bool hud_169 = false;     // #143: option removed, always false (the centred 4:3 HUD); the edge placement code stays unused (gx_lle.cpp hud_side_for)
   bool skip_any_cutscene = false;   // allow skipping cutscenes that have not been seen yet
+  // Which graphics API Aurora/Dawn asks for (needs a restart). Android has two: Vulkan, then OpenGL ES as the fallback.
+  // 0 auto = the same order the game has always used, 1 = force Vulkan, 2 = force OpenGL ES (diagnostics: a driver bug on
+  // one API makes the other one worth a try).
+  int render_backend = 0;
   int compressed_textures = 0;      // ETC2 policy: 0 auto (a phone transcodes CMPR, a desktop does not), 1 never, 2 everything
   int settings_version = 0;         // the ini format this file was written with (load() migrates older ones)
   bool warp_enemy_counts = false;   // #141 default off; #108: checkpoint warp screen: a red number per hexagon = mission enemies left nearest it

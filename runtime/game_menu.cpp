@@ -142,7 +142,7 @@ void after_change(const ms::Item& it) {
   logf("[menu] %s = %d\n", it.key, raw_value(it));
   if (it.store != ms::Store::Ini) return;
   const std::string k = it.key;
-  if (k == "resolution" || k == "widescreen") settings::apply_display();
+  if (k == "resolution" || k == "widescreen" || k == "compressed_textures") settings::apply_display();   // live
   else if (k == "fullscreen") {
     const bool want = settings::g.fullscreen;
     if (want != gxlle::is_fullscreen()) gxlle::toggle_fullscreen();
