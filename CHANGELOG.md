@@ -2,8 +2,8 @@
 
 ## Unreleased
 
-- **Graphics API is now a setting: Auto (Vulkan, then OpenGL ES), Vulkan, or OpenGL ES** (Settings > Graphics >
-  "Graphics API", `SHADOW_BACKEND=vulkan|gles` for a script). The port asks Dawn for Vulkan on Android and only falls
+- **Graphics API is now a setting: Auto (Vulkan, then OpenGL ES), Vulkan, or OpenGL ES** (Settings > Display >
+  Screen > "Graphics API", `SHADOW_BACKEND=vulkan|gles` for a script). The port asks Dawn for Vulkan on Android and only falls
   back to OpenGL ES if Vulkan refuses to start, so a driver bug in one of them looks like a driver bug in "the game" -
   now one tap on the other API says which. The frame-rate overlay names the API and the adapter in use (that answer used
   to be three log lines deep).

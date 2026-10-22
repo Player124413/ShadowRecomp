@@ -7,7 +7,7 @@
 // Everything the port logs goes through logf() (runtime/rt_sys.cpp), which feeds this ring; Aurora's own messages
 // arrive there too through the log callback in gx_lle.cpp, so Dawn's errors are included.
 //
-// Settings > Display > Picture > "Show log" (or SHADOW_LOG=1) draws it over the game.
+// Settings > System > Bug reports > "Show log on the screen" (or SHADOW_LOG=1) draws it over the game.
 #include <cstddef>
 #include <string>
 #include <vector>

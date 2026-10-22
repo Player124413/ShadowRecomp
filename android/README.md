@@ -191,7 +191,7 @@ The target is a locked 60 fps, so the port is built for it rather than tuned aft
   alpha (`SHADOW_ETC2=1` forces it for all RGB sources, `=0` turns it off). The APK requires a GLES3 / Vulkan-class
   device, where ETC2 is guaranteed;
 * Dawn renders through Vulkan. Android builds also link Dawn's OpenGL ES backend, and that is the fallback when Vulkan
-  cannot start; Settings > Graphics > "Graphics API" (or `SHADOW_BACKEND=vulkan|gles`) forces one of them, which is the
+  cannot start; Settings > Display > Screen > "Graphics API" (or `SHADOW_BACKEND=vulkan|gles`) forces one of them, which is the
   first thing to try when the picture draws wrong on one driver. libc++ is linked statically, and the audio stream keeps
   SDL's own device buffering.
 
@@ -202,7 +202,7 @@ The launcher's settings travel as command-line arguments (`--disc`, `--perf`, `-
 
 A phone has no console, so the port answers questions with the screen instead:
 
-* **Settings > Graphics > "Graphics API"**: Auto / Vulkan / OpenGL ES. The frame-rate overlay names the API and the
+* **Settings > Display > Screen > "Graphics API"**: Auto / Vulkan / OpenGL ES. The frame-rate overlay names the API and the
   adapter it is actually using (`vulkan - Adreno (TM) 740`, `opengl es - Mali-G78`), so "which one is it" is one glance.
 * **Settings > System > Bug reports**:
   * **Show log on the screen** draws the tail of the log over the picture, with error lines pinned in red at the top (a
