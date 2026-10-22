@@ -212,6 +212,10 @@ static void poll_live() {
 }
 
 // One ini key (load, and INPUT_FILE "SET key=value" in tests). False = unknown key.
+// Bumped when a default that older ini files carry has to change for everybody who updates: 2 = a phone's settings file
+// allows skipping cutscenes (see load()).
+constexpr int kSettingsVersion = 2;
+
 static bool set_key(const char* key, int v) {
   if (!strcmp(key, "height")) g.height = v;
   else if (!strcmp(key, "width")) g.width = v;
@@ -228,6 +232,8 @@ static bool set_key(const char* key, int v) {
   else if (!strcmp(key, "pause_new")) {}   // #149: the PC pause menu is retired (old ini lines are ignored)
   else if (!strcmp(key, "gauges_new")) {}   // #143 the PC gauges were removed: old ini lines are ignored
   else if (!strcmp(key, "skip_any_cutscene")) g.skip_any_cutscene = v != 0;
+  else if (!strcmp(key, "compressed_textures")) g.compressed_textures = std::clamp(v, 0, 2);
+  else if (!strcmp(key, "settings_version")) g.settings_version = v;
   else if (!strcmp(key, "warp_enemy_counts")) g.warp_enemy_counts = v != 0;
   else if (!strcmp(key, "fov_percent")) g.fov_percent = v;
   else if (!strcmp(key, "cam_sens")) g.cam_sens = v;
@@ -278,6 +284,7 @@ void load() {
   if (!f) {
     // no settings file yet: the phone's own defaults (see below)
     if (plat::is_android()) g.skip_any_cutscene = true;
+    g.settings_version = kSettingsVersion;
     return;
   }
   bool saw_skip_key = false;
@@ -308,9 +315,14 @@ void load() {
   }
   fclose(f);
   // A phone has no keyboard to explain "START skips cutscenes you have already seen", and a movie the player has not
-  // watched yet is exactly the one they want to get past: on Android the option starts on (the touch SKIP control
-  // works either way). An ini that already holds the key keeps whatever the player chose.
-  if (plat::is_android() && !saw_skip_key) g.skip_any_cutscene = true;
+  // watched yet is exactly the one they want to get past: on Android the option starts on. A file written by an older
+  // build is migrated (settings_version), not left at the old default - "cutscenes cannot be skipped" was the report
+  // that came out of exactly that.
+  if (plat::is_android() && (!saw_skip_key || g.settings_version < kSettingsVersion)) {
+    if (!g.skip_any_cutscene) logf("[settings] Android: skipping cutscenes is on from now on\n");
+    g.skip_any_cutscene = true;
+  }
+  g.settings_version = kSettingsVersion;
   archive_lighting();
 }
 
@@ -355,7 +367,8 @@ void save() {
   if (!f) return;
   fprintf(f, "width=%d\nheight=%d\nwidescreen=%d\nfullscreen=%d\nfps_target=%d\nshow_fps=%d\ngame_bloom=%d\n", g.width, g.height,
           (int)g.widescreen, (int)g.fullscreen, g.fps_target, (int)g.show_fps, (int)g.game_bloom);
-  fprintf(f, "dynamic_resolution=%d\n", (int)g.dynamic_resolution);
+  fprintf(f, "dynamic_resolution=%d\nsettings_version=%d\ncompressed_textures=%d\n", (int)g.dynamic_resolution,
+          kSettingsVersion, g.compressed_textures);
   fprintf(f, "clip_ui_43=%d\ncutscene_bars=%d\nskip_any_cutscene=%d\nhud_169=%d\nwarp_enemy_counts=%d\n", (int)g.clip_ui_43, (int)g.cutscene_bars,
           (int)g.skip_any_cutscene, (int)g.hud_169, (int)g.warp_enemy_counts);
   fprintf(f, "fov_percent=%d\ncam_sens=%d\ninvert_cam_x=%d\ninvert_cam_y=%d\n", g.fov_percent, g.cam_sens, (int)g.invert_cam_x,
@@ -520,7 +533,15 @@ void draw() {
     ImGui::Begin("##fps", nullptr,
                  ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoInputs |
                      ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoFocusOnAppearing | ImGuiWindowFlags_NoNav);
-    ImGui::Text("%.0f FPS", s_fps);
+    // The frame rate on its own is not enough to report a problem with: these lines say where the picture is going
+    // wrong (a phone rendering at its panel height, the adaptive resolution pulling that down, textures compressed or
+    // not, and whether a cutscene is on screen). Display > Picture > "Show frame rate" turns it on.
+    ImGui::Text("%.0f FPS   %.1f ms", s_fps, s_fps > 0 ? 1000.0 / s_fps : 0.0);
+    ImGui::Text("render %dp   scale x%.2f", gxlle::effective_render_height(), gxlle::drs_scale());
+    const int em = gxlle::etc2_mode();
+    ImGui::Text("textures %s   %llu compressed, %d%% less", em == 0 ? "32-bit" : em == 1 ? "ETC2" : "ETC2 (all)",
+                (unsigned long long)gxlle::etc2_textures(), gxlle::etc2_saved_percent());
+    ImGui::Text("%s", game::cutscene_active() ? "cutscene" : game::in_stage() ? "stage" : "menus");
     ImGui::End();
   }
   {

@@ -38,6 +38,7 @@ inline constexpr Option kOpt8[] = {{"Original", 0, 0}, {"Custom", 1, 0}};   // m
 inline constexpr Option kOpt9[] = {{"Original", 0, 0}, {"Smart", 1, 0}};   // hm_mode
 inline constexpr Option kOpt10[] = {{"Low", 0, 0}, {"Medium", 1, 0}, {"High", 2, 0}, {"Ultra", 3, 0}};   // light_quality
 inline constexpr Option kOpt11[] = {{"1024", 0, 0}, {"2048", 1, 0}};   // light_shadow_res
+inline constexpr Option kOpt12[] = {{"Auto", 0, 0}, {"Off (32-bit)", 1, 0}, {"On (ETC2)", 2, 0}};   // compressed_textures
 
 inline constexpr Page kPages[] = {
     {"display", "Display"},
@@ -94,6 +95,7 @@ inline constexpr Item kItems[] = {
     {2, "draw_distance", Kind::Slider, Store::Ini, "View distance", "How far away the world is drawn. 100% is the original; more can lower the frame rate.", 100, 100, 400, "%d%%", nullptr, 0, 0, nullptr, -1, -1, 0, 0u, &settings::Values::draw_distance, nullptr, nullptr, nullptr, false, false, 0},
     {2, "draw_objects", Kind::Slider, Store::Ini, "Object distance", "How far away rings and decorations appear. 100% is the original; more can lower the frame rate.", 100, 100, 300, "%d%%", nullptr, 0, 1, nullptr, -1, -1, 0, 0u, &settings::Values::draw_objects, nullptr, nullptr, nullptr, false, false, 0},
     {2, "original_logic", Kind::Toggle, Store::Ini, "Original game logic", "Runs the game's own code exactly: speed-ups off, view and object distance back to 100%.", 1, 0, 0, nullptr, nullptr, 0, 0, nullptr, -1, -1, 0, 0u, nullptr, nullptr, &settings::Values::original_logic, nullptr, false, false, 0},
+    {3, "compressed_textures", Kind::Choice, Store::Ini, "Compressed textures", "A phone keeps world textures in ETC2: four times less memory than 32-bit, the same size as the console's own compressed art. If the world turns black while the HUD still draws, set this to Off and report it.", 0, 0, 0, nullptr, kOpt12, 3, 0, nullptr, -1, -1, 0, 0u, &settings::Values::compressed_textures, nullptr, nullptr, nullptr, false, false, 0},
     {3, "game_bloom", Kind::Toggle, Store::Ini, "Glow", "The game's soft glow around bright lights, fire and neon. Off: a sharper, flatter picture.", 1, 0, 0, nullptr, nullptr, 0, 0, nullptr, -1, -1, 0, 0u, nullptr, nullptr, &settings::Values::game_bloom, nullptr, false, false, 0},
     {3, "game_bloom_strength", Kind::Slider, Store::Ini, "Glow strength", "100% is the glow as in the original game; 0% is no glow.", 100, 0, 200, "%d%%", nullptr, 0, 0, "game_bloom", -1, -1, 0, 0u, &settings::Values::game_bloom_strength, nullptr, nullptr, nullptr, false, false, 0},
     {3, "game_bloom_quality", Kind::Choice, Store::Ini, "Glow smoothness", "Smooth: the same glow without square blocks. Original: the game's own blocky glow.", 0, 0, 0, nullptr, kOpt4, 2, 0, "game_bloom", -1, -1, 0, 0u, &settings::Values::game_bloom_quality, nullptr, nullptr, nullptr, false, false, 0},

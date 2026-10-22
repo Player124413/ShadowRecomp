@@ -27,6 +27,7 @@ namespace first_boot_hint { void frame(); }   // first_boot_hint.cpp (#155)
 
 #include "gx/gx.hpp"
 #include "gx/command_processor.hpp"
+#include "gfx/etc2_transcode.hpp"
 #include "window.hpp"
 
 #include <cstring>
@@ -1652,6 +1653,9 @@ int effective_render_height() {
   return drs::height_for(wanted);
 }
 void apply_display_settings(bool quiet) {
+  // Display > Picture > "Compressed textures" (settings_ui.cpp), pushed here because this is where the renderer's own
+  // settings are applied. Auto (0) leaves the platform policy in etc2_transcode.cpp alone.
+  aurora::gfx::etc2::set_enabled(settings::g.compressed_textures);
   int h = effective_render_height();
   aurora::window::set_frame_buffer_scale((float)h / 480.0f);
   g_ws_active = g_widescreen && !(settings::g.cutscene_bars && game::cutscene_active());
@@ -1666,6 +1670,14 @@ void apply_display_settings(bool quiet) {
     AuroraSetViewportPolicy(AURORA_VIEWPORT_FIT);
     if (!quiet) logf("[gx] render resolution %dx%d (4:3)\n", h * 4 / 3, h);
   }
+}
+double drs_scale() { return drs::scale(); }
+int etc2_mode() { return aurora::gfx::etc2::stats().mode; }
+uint64_t etc2_textures() { return aurora::gfx::etc2::stats().textures; }
+int etc2_saved_percent() {
+  const auto st = aurora::gfx::etc2::stats();
+  if (st.before == 0) return 0;
+  return (int)(100.0 * (1.0 - (double)st.after / (double)st.before) + 0.5);
 }
 float widescreen_camera_factor() { return (g_ws_active && g_ws_factor > 0.0f && g_ws_factor < 0.999f) ? 1.0f / g_ws_factor : 1.0f; }
 bool is_fullscreen() { return g_window && (SDL_GetWindowFlags(g_window) & SDL_WINDOW_FULLSCREEN) != 0; }

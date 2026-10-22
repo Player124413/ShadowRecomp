@@ -17,6 +17,11 @@ extern bool g_game_bloom;      // settings: draw the game's bloom/glow pass
 extern uint64_t g_prof_ns[4];  // FPS_LOG profiling (ns): gp_run, Aurora processing, present
 uint64_t xfb_count();          // frames displayed so far (hang watchdog)
 int effective_render_height(); // render height actually in use
+// Diagnostics overlay (settings_ui.cpp): the adaptive resolution's current multiplier and how textures are held.
+double drs_scale();
+int etc2_mode();                // 0 off, 1 compressed sources only (the phone default), 2 every RGB source
+uint64_t etc2_textures();       // textures that went through the encoder
+int etc2_saved_percent();       // how much smaller the texture data became, %
 void apply_display_settings(bool quiet = false); // re-apply g_render_height / g_widescreen (settings UI);
                                             // quiet: do not log (the adaptive-resolution steps)
 bool is_fullscreen();

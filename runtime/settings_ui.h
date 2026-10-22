@@ -22,6 +22,8 @@ struct Values {
   bool gauges_new = false;  // #143: the PC gauges were removed; always false (field kept until the menu schema drops it)
   bool hud_169 = false;     // #143: option removed, always false (the centred 4:3 HUD); the edge placement code stays unused (gx_lle.cpp hud_side_for)
   bool skip_any_cutscene = false;   // allow skipping cutscenes that have not been seen yet
+  int compressed_textures = 0;      // ETC2 policy: 0 auto (a phone transcodes CMPR, a desktop does not), 1 never, 2 everything
+  int settings_version = 0;         // the ini format this file was written with (load() migrates older ones)
   bool warp_enemy_counts = false;   // #141 default off; #108: checkpoint warp screen: a red number per hexagon = mission enemies left nearest it
   bool unlock_all_stages = false;   // stage select: every stage available (this session only, never saved)
   int fov_percent = 100;    // field of view, % of the original (70-150)
