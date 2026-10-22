@@ -164,9 +164,12 @@ both work. The parser and its test are platform-free (`tools/android/`):
 g++ -std=c++20 -Iruntime tools/android/touch_layout_test.cpp runtime/touch_layout.cpp -o t && ./t
 ```
 
-While a pre-rendered cutscene streams, the overlay shows one `SKIP` control (bottom centre) that jumps the movie to its
-tail; the `Skip any cutscene` setting (on for a fresh install on Android) additionally lets the `START` control skip
-one, and the render height is capped at 720 lines for the duration so the emulated video decoder gets the frame time.
+While a cutscene plays - a pre-rendered movie or an in-engine story scene - the overlay shows one `SKIP` control (bottom
+centre). For a movie it jumps the stream to its tail; for an in-engine scene it sets the game's own skip. Either way it
+works whether or not you have seen that scene before: the `Skip any cutscene` setting only decides whether a plain
+`START` press does the same, and it starts on for phones (a settings file written by an older build is migrated). The
+render height is capped at 720 lines while a movie streams, so the emulated video decoder gets the frame time instead of
+the GPU.
 
 A connected Bluetooth/USB gamepad hides the overlay (`hide_with_gamepad=1`) and drives the game directly; a physical
 stick always wins over a thumb on the glass.

@@ -34,6 +34,27 @@
   capped at 720 lines while a movie streams so the emulated Sofdec decoder gets the frame time instead of the GPU.
 - `[drs]` log line once every 5 s with the measured frame rate and render scale, `[gx] movie started/ended` and the
   render height: what a "it runs at 40 fps" report needs to be actionable.
+- **Cutscenes can be skipped from the touch screen**, whichever kind they are: `SKIP` now appears during an in-engine
+  story scene as well as during a pre-rendered movie, and pressing it ends the scene without needing the "Skip any
+  cutscene" option (a control labelled SKIP is an explicit request; the option only decides whether a bare START press
+  also skips a scene you have not seen). A settings file written by an earlier build is migrated, so the option starts
+  on for phones instead of keeping the old default - which is why START did nothing.
+- **The texture encoder is about seven times faster**: 2 us per 4x4 block instead of 16, measured by
+  `tools/android/etc2_check.cpp` (which now prints it). It solved a squared distance in floating point per pixel per
+  modifier table per base-colour mode; the error of modifier m is now `|d|^2 - (2*m*|S1| - 3*m*m)`, so the best of the
+  four modifiers is a handful of integer operations over a sub-block whose base colour is its mean refined twice.
+  Decoded quality is if anything better (37.7 dB on the gradient instead of 37.4). This is the difference between a
+  texture upload being invisible and a visible hitch: 16 us per block is a 260 ms freeze while a 512x512 texture loads.
+- A texture the game re-uploads every frame - a movie frame, a streaming texture - is no longer transcoded
+  (`third_party/aurora/lib/gfx/upload_churn.hpp`): encoding it on the render thread once per frame costs more than the
+  RGBA8 upload it saves. A size that produces more than five new textures inside a second, spread over at least 200 ms,
+  is left uncompressed while the stream runs; a level load's burst of same-sized textures keeps its compression.
+  `tools/android/churn_test.cpp` checks the timing rules against a fake clock.
+- `Display > Picture > Compressed textures` (Auto / Off / On), and the first log line now says which way it went and
+  whether the GPU reported ETC2 at all: if a driver mis-samples ETC2 the world can be black while the HUD still draws,
+  and that is now one tap away from being ruled out.
+- The frame-rate overlay also shows the frame time, the height being rendered, the adaptive resolution's scale, how
+  many textures are compressed and by how much, and whether a cutscene is on screen.
 - The Android build is built and packaged by GitHub Actions on every push (`.github/workflows/android-apk.yml`): the
   disc-free tests, a full arm64 compile of the native port, and an installable launcher-only APK. Set the
   `SHADOW_GEN_URL` secret to your own `generated/` tarball and the same job builds the real APK.

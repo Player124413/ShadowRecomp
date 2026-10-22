@@ -109,6 +109,12 @@ jobs:
               -o /tmp/touch_layout_test
           /tmp/touch_layout_test
 
+      - name: Per-frame upload detection (no GPU, fake clock)
+        run: |
+          g++ -std=c++20 -O2 -Wall -Wextra -Ithird_party/aurora/lib \
+              tools/android/churn_test.cpp -o /tmp/churn_test
+          /tmp/churn_test
+
       - name: ETC2 encoder (decoded by an independent decoder)
         run: |
           python3 -m pip install --quiet texture2ddecoder
