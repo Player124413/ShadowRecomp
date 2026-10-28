@@ -46,13 +46,16 @@ public class LauncherActivity extends Activity {
     private Button editTouchButton;
     private SeekBar renderScale;
     private TextView renderScaleLabel;
+    private TextView logStatus;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        JavaCrash.install(this);   // a crash in here still leaves something to send (JavaCrash.java)
         prefs = getSharedPreferences(PREFS, MODE_PRIVATE);
         setContentView(buildUi());
         refreshDiscStatus();
+        refreshLogStatus();
     }
 
     // ---------------------------------------------------------------------------------------------------------------
@@ -155,10 +158,35 @@ public class LauncherActivity extends Activity {
         playButton.setOnClickListener(v -> startGame(false));
         root.addView(playButton);
 
-        TextView footer = text("Settings are kept on this phone. No game files are included: the image you import " +
+        // ---- the log ----
+        // A phone has no console and no cable, so this is where "something went wrong" is answered: one tap sends the
+        // newest log (a crash report, if the last run did not finish) to any app on the phone.
+        root.addView(sectionTitle("Something went wrong?"));
+        logStatus = text("", 14, Color.rgb(170, 176, 190));
+        logStatus.setPadding(0, 0, 0, dp(6));
+        root.addView(logStatus);
+
+        Button sendLog = button("Send the log\u2026", false);
+        sendLog.setOnClickListener(v -> LogSharing.share(this));
+        root.addView(sendLog);
+
+        Button copyLog = button("Copy the log", false);
+        copyLog.setOnClickListener(v -> LogSharing.copy(this));
+        root.addView(copyLog);
+
+        TextView logHint = text("Opens the phone's share sheet with the log attached - a messenger, mail or Drive. " +
+                "If the game crashed, the log of the run that crashed is the one sent.", 13, Color.rgb(150, 156, 170));
+        root.addView(logHint);
+
+        TextView footer = text("Settings and saves are kept on this phone and survive an update: a new build installs " +
+                "over the old one, so there is nothing to import again. No game files are included: the image you import " +
                 "stays in the app's private folder and is only read by the game.", 12, Color.rgb(120, 126, 140));
         footer.setPadding(0, dp(18), 0, 0);
         root.addView(footer);
+
+        TextView version = text("Version " + LogSharing.version(this), 12, Color.rgb(110, 116, 130));
+        version.setPadding(0, dp(8), 0, 0);
+        root.addView(version);
         return scroll;
     }
 
@@ -307,5 +335,13 @@ public class LauncherActivity extends Activity {
     protected void onResume() {
         super.onResume();
         refreshDiscStatus();
+        refreshLogStatus();
+    }
+
+    private void refreshLogStatus() {
+        if (logStatus == null) return;
+        final boolean crashed = LogSharing.latestCrash(this) != null;
+        logStatus.setText(LogSharing.summary(this));
+        logStatus.setTextColor(crashed ? Color.rgb(240, 190, 120) : Color.rgb(170, 176, 190));
     }
 }

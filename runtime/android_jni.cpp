@@ -8,6 +8,8 @@
 #include <jni.h>
 #include <SDL3/SDL.h>
 
+#include "plat.h"   // plat::android_share_log, so the definition below is checked against its declaration
+
 #include <mutex>
 
 // Aurora's surface lock (third_party/aurora/lib/window.cpp, SurfaceLock) takes SDL's Android activity mutex around
@@ -36,6 +38,33 @@ extern "C" void Android_LockActivityMutex(void) {
 extern "C" void Android_UnlockActivityMutex(void) {
   if (SDL_Mutex* mutex = surface_mutex()) SDL_UnlockMutex(mutex);
 }
+
+// ---- native -> Java: the in-game menu's "Send the log" row ------------------------------------------------------------
+// The only Java entry point the game itself calls. Everything it needs to do (find the newest log, hand it to the share
+// sheet) is written in Java, where Android's APIs are: this only names the method.
+//
+// The class is taken from the running activity instead of FindClass(): on Android FindClass from a bare native thread
+// searches the *system* class loader and does not find the app's own classes, while GetObjectClass(activity) is exactly
+// the ShadowActivity the manifest declares.
+namespace plat {
+bool android_share_log() {
+  JNIEnv* env = static_cast<JNIEnv*>(SDL_GetAndroidJNIEnv());
+  if (env == nullptr) return false;
+  jobject activity = static_cast<jobject>(SDL_GetAndroidActivity());
+  if (activity == nullptr) return false;
+  bool ok = false;
+  if (jclass cls = env->GetObjectClass(activity)) {
+    if (jmethodID mid = env->GetMethodID(cls, "shareLatestLog", "()V")) {
+      env->CallVoidMethod(activity, mid);
+      ok = !env->ExceptionCheck();
+      if (env->ExceptionCheck()) env->ExceptionClear();   // never let a Java error take the game down with it
+    }
+    env->DeleteLocalRef(cls);
+  }
+  env->DeleteLocalRef(activity);   // SDL_GetAndroidActivity returns a local reference
+  return ok;
+}
+}  // namespace plat
 
 extern "C" {
 void Java_dev_encounter_aurora_AuroraSurface_nativeSetSurfaceReady(JNIEnv*, jclass, jboolean);

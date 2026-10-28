@@ -7,10 +7,15 @@ plugins {
 // surface into app/src/main/java at configure time, so those exist in exactly one place in the repository.
 def shadowAbis = (project.findProperty('shadow.abis') ?: 'arm64-v8a').split(',').collect { it.trim() }
 
-// An optional keystore.properties (keystore, alias, password) signs release builds; without it a release build is
-// unsigned and the debug build is what you install.
-def keystorePropsFile = rootProject.file('keystore.properties')
+// Signing. Two files are tried, in this order:
+//   keystore.properties        your own key (not in the repository), if you would rather sign it yourself
+//   shadow-signing.properties  the port's own fixed key, committed, together with shadow-key.p12
+// The second one exists so that a new APK *updates* the installed app instead of demanding an uninstall: Android refuses
+// an update signed by a different key, and Gradle's debug key is generated fresh on every machine, so the CI build used to
+// change its key on every run - every update cost the player their settings and saves. See tools/android/make_keystore.py.
 def keystoreProps = new Properties()
+def keystorePropsFile = rootProject.file('keystore.properties')
+if (!keystorePropsFile.exists()) keystorePropsFile = rootProject.file('shadow-signing.properties')
 if (keystorePropsFile.exists()) {
     keystorePropsFile.withInputStream { keystoreProps.load(it) }
 }
@@ -24,8 +29,11 @@ android {
         applicationId = 'dev.shadowrecomp'
         minSdk = 26                 // Vulkan + ETC2 are required by the renderer and present on every 64-bit phone
         targetSdk = 35
-        versionCode = 1
-        versionName = '1.0'
+        // versionCode must grow for Android to treat a build as an update of the installed one. CI passes the workflow
+        // run number (-Pshadow.versionCode=...), so every artifact is newer than the last; a local build without it
+        // still installs over anything older.
+        versionCode = (project.findProperty('shadow.versionCode') ?: System.getenv('SHADOW_VERSION_CODE') ?: '1') as int
+        versionName = (project.findProperty('shadow.versionName') ?: '1.1').toString()
 
         ndk {
             abiFilters.addAll(shadowAbis)
@@ -43,8 +51,9 @@ android {
 
     if (!keystoreProps.isEmpty()) {
         signingConfigs {
-            release {
+            port {
                 storeFile rootProject.file(keystoreProps['storeFile'])
+                storeType keystoreProps['storeType'] ?: 'PKCS12'
                 storePassword keystoreProps['storePassword']
                 keyAlias keystoreProps['keyAlias']
                 keyPassword keystoreProps['keyPassword']
@@ -56,11 +65,14 @@ android {
         debug {
             debuggable true
             jniDebuggable true
+            // Same key as the release build and as every earlier CI artifact: an install of this over the previous APK is
+            // a plain update. Without a key file (a bare checkout) this falls back to Gradle's debug key.
+            if (!keystoreProps.isEmpty()) signingConfig signingConfigs.port
         }
         release {
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
-            if (!keystoreProps.isEmpty()) signingConfig signingConfigs.release
+            if (!keystoreProps.isEmpty()) signingConfig signingConfigs.port
         }
     }
 

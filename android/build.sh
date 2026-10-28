@@ -4,6 +4,7 @@
 #   ./build.sh                 # debug APK (installable as-is)
 #   ./build.sh release         # release APK (unsigned unless android/keystore.properties exists)
 #   ./build.sh --install       # debug APK, then adb install -r
+#   ./build.sh --version-code 42   # bump the APK's versionCode (an update needs a higher one than the installed app)
 #   ./build.sh clean           # remove build outputs
 #
 # What it does: checks the recompiled game code exists (tools/gen.py), finds a JDK 17+ and an Android SDK, installs
@@ -16,14 +17,26 @@ root="$(cd "$here/.." && pwd)"
 
 task="debug"
 install_after=0
-for arg in "$@"; do
+version_code=""
+while [ $# -gt 0 ]; do
+  arg="$1"
+  shift
   case "$arg" in
     debug|release|clean) task="$arg" ;;
     --install|-i) install_after=1 ;;
+    --version-code)
+      [ $# -gt 0 ] || { printf '--version-code needs a number\n' >&2; exit 2; }
+      version_code="$1"; shift ;;
     -h|--help) sed -n '2,10p' "$0"; exit 0 ;;
     *) printf 'unknown argument: %s\n' "$arg" >&2; exit 2 ;;
   esac
 done
+
+# An update installs only if its versionCode is higher than the installed app's; CI passes the run number.
+if [ -n "$version_code" ]; then
+  SHADOW_GRADLE_ARGS="${SHADOW_GRADLE_ARGS:-} -Pshadow.versionCode=$version_code"
+  export SHADOW_GRADLE_ARGS
+fi
 
 say() { printf '\033[1;34m==>\033[0m %s\n' "$*"; }
 die() { printf '\033[1;31merror:\033[0m %s\n' "$*" >&2; exit 1; }

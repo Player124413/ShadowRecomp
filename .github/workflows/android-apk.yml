@@ -103,6 +103,29 @@ jobs:
           sys.exit(0 if ok else 1)
           PY
 
+      # The signing key is what makes a new APK *update* the installed app instead of asking for an uninstall (see
+      # tools/android/make_keystore.py). It is committed, so a corrupted or missing file must fail here - in eighteen
+      # seconds - and not silently produce an APK that nobody can install over the previous one.
+      - name: The APK signing key loads (updates install over the app)
+        run: |
+          python3 -m pip install --quiet cryptography
+          python3 - <<'PY'
+          import pathlib, sys
+          from cryptography.hazmat.primitives.serialization import pkcs12
+          props = {}
+          for line in pathlib.Path('android/shadow-signing.properties').read_text().splitlines():
+              if line.strip() and not line.startswith('#'):
+                  k, _, v = line.partition('=')
+                  props[k.strip()] = v.strip()
+          blob = pathlib.Path('android', props['storeFile']).read_bytes()
+          key, cert, _ = pkcs12.load_key_and_certificates(blob, props['storePassword'].encode())
+          print('key:', key.key_size, 'bits; alias expected:', props['keyAlias'])
+          print('subject:', cert.subject.rfc4514_string())
+          print('valid until:', cert.not_valid_after_utc)
+          assert key is not None and cert is not None
+          assert cert.not_valid_after_utc.year >= 2050, 'the key would expire during the port's life'
+          PY
+
       - name: Touch layout round-trip
         run: |
           g++ -std=c++20 -O2 -Wall -Wextra -Iruntime runtime/touch_layout.cpp tools/android/touch_layout_test.cpp \
@@ -114,6 +137,12 @@ jobs:
           g++ -std=c++20 -O2 -Wall -Wextra -Iruntime \
               tools/android/perf_auto_test.cpp -o /tmp/perf_auto_test
           /tmp/perf_auto_test
+
+      - name: Crash reports (a crash against a system kill, from real log tails)
+        run: |
+          g++ -std=c++20 -O2 -Wall -Wextra -Iruntime \
+              tools/android/crash_report_test.cpp -o /tmp/crash_report_test
+          /tmp/crash_report_test
 
       - name: Per-frame upload detection (no GPU, fake clock)
         run: |
@@ -374,7 +403,9 @@ jobs:
           # Keep Gradle and the Android build files in the workspace, and let the build use a .gradle-dist download.
           GRADLE_OPTS: -Dorg.gradle.daemon=false
           # The launcher-only build links the stand-in game code (see the job's comment at the top of the file).
-          SHADOW_GRADLE_ARGS: ${{ steps.cmake.outputs.version && format('-Pshadow.cmake={0}', steps.cmake.outputs.version) || '' }} -Pshadow.stubGameCode=${{ steps.gamecode.outputs.have == 'yes' && 'OFF' || 'ON' }}
+          # shadow.versionCode = this run's number: every artifact is a newer version than the previous one, so Android
+          # installs it over the app that is already on the phone (the key is fixed, see android/shadow-signing.properties).
+          SHADOW_GRADLE_ARGS: ${{ steps.cmake.outputs.version && format('-Pshadow.cmake={0}', steps.cmake.outputs.version) || '' }} -Pshadow.stubGameCode=${{ steps.gamecode.outputs.have == 'yes' && 'OFF' || 'ON' }} -Pshadow.versionCode=${{ github.run_number }} -Pshadow.versionName=1.1.${{ github.run_number }}
         run: |
           set +e
           chmod +x android/build.sh

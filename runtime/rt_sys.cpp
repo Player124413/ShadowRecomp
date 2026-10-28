@@ -1,6 +1,7 @@
 // Safe points, exceptions, SPRs and misc system glue.
 #include "sys.h"
 #include "log_ring.h"
+#include "crash_report.h"
 #include "hw.h"
 #include "rt_sched.h"
 #include "gx_lle.h"
@@ -325,6 +326,7 @@ static void signal_filter(int sig) {
 // and settings are saved when they change. Windows releases the GPU device with the process.
 void audio_stop_for_exit();   // audio.cpp
 [[noreturn]] void sys_exit_guarded(int code) {
+  crash_report::finish();   // a delivered exit is not a crash (crash_report.h)
   const uint64_t t0 = plat::now_ms();
 #ifdef _WIN32
   // the window goes away at once (the kernel may need a moment to release a GPU device that is still busy)

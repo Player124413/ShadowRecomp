@@ -69,6 +69,10 @@
 !/android/build.sh
 !/android/gradle/wrapper/gradle-wrapper.properties
 !/android/local.properties.example
+# the port's fixed APK signing key: it is what makes a new build update the installed app (see
+# tools/android/make_keystore.py). Not a secret, deliberately in the repository.
+!/android/shadow-key.p12
+!/android/shadow-signing.properties
 !/android/app/proguard-rules.pro
 !/android/app/src/main/AndroidManifest.xml
 !/android/app/src/main/res/

@@ -17,6 +17,7 @@
 #include "movement.h"
 #include "osk.h"
 #include "controls.h"
+#include "crash_report.h"
 #include <imgui.h>
 #include <SDL3/SDL.h>
 #include <algorithm>
@@ -35,6 +36,7 @@
 namespace ms = menu_schema;
 
 namespace first_boot_hint { void menu_opened(); }   // first_boot_hint.cpp (#155)
+void hud_text_show(const char* text, double seconds);   // settings_ui.cpp (the banner over the game)
 namespace game_menu {
 namespace {
 
@@ -77,7 +79,7 @@ int n_pages() { return kSchemaSystem >= 0 ? ms::kNumPages : ms::kNumPages + 1; }
 // #169 the Controls page: a schema page with no sections (id "controls"); its rows are the bindings (controls.cpp)
 const int kControlsPage = [] { for (int p = 0; p < ms::kNumPages; ++p) if (!strcmp(ms::kPages[p].id, "controls")) return p; return -1; }();
 const char* page_title(int p) { return p < ms::kNumPages ? ms::kPages[p].title : "System"; }
-enum class RowKind { Section, Item, Restart, Info, Extract, OpenTex, Note, Bind, BindReset, PresetNew, PresetSave, PresetRename, PresetDelete };   // Preset*: #144 (Shadow)
+enum class RowKind { Section, Item, Restart, Info, Extract, OpenTex, Note, Bind, BindReset, ShareLog, CopyLog, PresetNew, PresetSave, PresetRename, PresetDelete };   // Preset*: #144 (Shadow)
 struct Row { RowKind kind; int idx; float y, h; };   // y: top within the list content
 
 const ms::Item* find_item(const char* key) {
@@ -279,6 +281,7 @@ std::vector<Row> rows_of(int page, float u) {
   if (page == kSystemPage) {
     add(RowKind::Section, -1, sec_h); add(RowKind::Restart, 0, item_h); add(RowKind::Info, 0, item_h);
     add(RowKind::Section, -2, sec_h); add(RowKind::Extract, 0, item_h); add(RowKind::OpenTex, 0, item_h);   // #143
+    add(RowKind::Section, -6, sec_h); add(RowKind::ShareLog, 0, item_h); add(RowKind::CopyLog, 0, item_h);   // the log
     if (kSchemaSystem < 0) return r;   // #170: else the schema's System sections follow
   }
   for (int s = 0; s < ms::kNumSections; ++s) {
@@ -417,6 +420,35 @@ void set_page(int p, const Layout& L) {
   g_focus_t = -10;
   g_list = false;
 }
+// ---- the Logs rows -------------------------------------------------------------------------------------------------
+// A phone has no console, no cable and no adb, so the log leaves the device the way any other file does: through the
+// share sheet (LogSharing.java, reached over JNI) or the clipboard. The row's value column says what happened, because a
+// toast would just be another thing the player cannot read.
+std::string g_log_status;
+
+void copy_log() {
+  const std::string t = crash_report::tail_text(400);
+  if (t.empty()) { g_log_status = "Nothing logged yet"; hud_text_show("There is no log yet: play once, then copy it", 4); return; }
+  ImGui::SetClipboardText(t.c_str());
+  g_log_status = "Copied " + std::to_string(std::count(t.begin(), t.end(), '\n')) + " lines";
+  hud_text_show("Log copied to the clipboard", 3);
+}
+
+void share_log() {
+  if (!plat::is_android()) {   // the desktop has no share sheet; the clipboard is the same one-tap hand-over
+    copy_log();
+    g_log_status += " (clipboard)";
+    return;
+  }
+  if (plat::android_share_log()) {
+    g_log_status = "Share sheet opened";
+    hud_text_show("Choose an app to send the log to", 4);
+  } else {
+    g_log_status = "No share sheet: copied instead";
+    copy_log();
+  }
+}
+
 void activate(const Layout& L) {
   const auto rows = rows_of(g_page, L.u);
   if (g_focus < 0 || g_focus >= int(rows.size())) return;
@@ -425,6 +457,8 @@ void activate(const Layout& L) {
   if (rows[g_focus].kind == RowKind::BindReset) { controls::reset_all(); return; }
   if (rows[g_focus].kind == RowKind::Extract) { texture_extract::start(); return; }
   if (rows[g_focus].kind == RowKind::OpenTex) { texture_extract::open_folder(); return; }
+  if (rows[g_focus].kind == RowKind::ShareLog) { share_log(); return; }
+  if (rows[g_focus].kind == RowKind::CopyLog) { copy_log(); return; }
   if (rows[g_focus].kind == RowKind::PresetNew) { movement::ask_new(); return; }   // #144
   if (rows[g_focus].kind == RowKind::PresetSave) { movement::save_into(movement::active_preset()); return; }
   if (rows[g_focus].kind == RowKind::PresetRename) { movement::ask_rename(movement::active_preset()); return; }
@@ -486,7 +520,7 @@ float chips_lines(const Layout& L, int page) {   // page -1 = the current one
   int line = 0;
   for (const Row& r : rows) {
     if (r.kind != RowKind::Section) continue;
-    const float w = tsize(f_semi, fl(17 * u, 14), r.idx >= 0 ? ms::kSections[r.idx].title : r.idx == -2 ? "Textures" : r.idx == -3 ? "Controller" : r.idx == -4 ? "Keyboard and mouse" : r.idx == -5 ? "All controls" : "Game").x + 24 * u;
+    const float w = tsize(f_semi, fl(17 * u, 14), r.idx >= 0 ? ms::kSections[r.idx].title : r.idx == -2 ? "Textures" : r.idx == -3 ? "Controller" : r.idx == -4 ? "Keyboard and mouse" : r.idx == -5 ? "All controls" : r.idx == -6 ? "Logs" : "Game").x + 24 * u;
     if (cx + w > max_x) { if (line == 1) break; ++line; cx = L.content_l; }
     cx += w + 8 * u;
   }
@@ -620,7 +654,7 @@ void draw_page(ImDrawList* dl, const Layout& L, int page, float alpha, float xof
     if (y + r.h > list_bottom + 0.5f) continue;   // only whole rows above the help line (a label goes with its first row)
     if (r.kind == RowKind::Section) {
       if (i + 1 < int(rows.size()) && base + rows[i + 1].y + rows[i + 1].h > list_bottom) continue;   // no orphan label at the bottom
-      const std::string t = upper(r.idx >= 0 ? ms::kSections[r.idx].title : r.idx == -2 ? "Textures" : r.idx == -3 ? "Controller" : r.idx == -4 ? "Keyboard and mouse" : r.idx == -5 ? "All controls" : "Game");
+      const std::string t = upper(r.idx >= 0 ? ms::kSections[r.idx].title : r.idx == -2 ? "Textures" : r.idx == -3 ? "Controller" : r.idx == -4 ? "Keyboard and mouse" : r.idx == -5 ? "All controls" : r.idx == -6 ? "Logs" : "Game");
       text_spaced(dl, f_semi, fl(17 * u, 14), ImVec2(X(L.content_l), y + 18 * u), C(T.dim, alpha), t.c_str(), 1.4f * u);
       continue;
     }
@@ -650,6 +684,17 @@ void draw_page(ImDrawList* dl, const Layout& L, int page, float alpha, float xof
       text(dl, f_text, label_px, ImVec2(X(L.content_l), mid - label_px * .68f), C(T.text, alpha), ex ? "Extract the game's textures" : "Open the textures folder");
       std::string v = ex ? texture_extract::status() : std::string("textures" RT_S "Custom and Original");
       if (ex && v.empty()) v = "To textures" RT_S "Original";
+      text(dl, f_text, 19 * u, ImVec2(vr - tsize(f_text, 19 * u, v.c_str()).x, mid - 19 * u * .68f), C(focus ? T.text : T.dim, alpha), v.c_str());
+      continue;
+    }
+    if (r.kind == RowKind::ShareLog || r.kind == RowKind::CopyLog) {   // the log, off the phone
+      const bool sh = r.kind == RowKind::ShareLog;
+      const char* lab = sh ? "Send the log" : "Copy the log";
+      text(dl, f_text, label_px, ImVec2(X(L.content_l), mid - label_px * .68f), C(T.text, alpha), lab);
+      std::string v = sh ? (plat::is_android() ? "Telegram, mail, Drive\xE2\x80\xA6" : "The last 400 lines")
+                         : "The last 400 lines";
+      if (sh && !g_log_status.empty()) v = g_log_status;
+      else if (sh && crash_report::previous_run_crashed()) v = "The last run crashed";   // and its report is the file sent
       text(dl, f_text, 19 * u, ImVec2(vr - tsize(f_text, 19 * u, v.c_str()).x, mid - 19 * u * .68f), C(focus ? T.text : T.dim, alpha), v.c_str());
       continue;
     }
@@ -811,13 +856,20 @@ void draw_hints(ImDrawList* dl, const Layout& L, float alpha) {
     const auto lines = wrap(f_text, hp, help, cw - nw - dash, cw);
     for (size_t k = 0; k < lines.size() && k < 2; ++k)
       text(dl, f_text, hp, ImVec2(k == 0 ? L.content_l + nw + dash : L.content_l, y + k * hp * 1.3f), C(T.dim, alpha), lines[k].c_str());
-  } else if (it || restart || info || (g_focus >= 0 && g_focus < int(rows.size()) && (rows[g_focus].kind == RowKind::Extract || rows[g_focus].kind == RowKind::OpenTex))) {
+  } else if (it || restart || info || (g_focus >= 0 && g_focus < int(rows.size()) &&
+                                       (rows[g_focus].kind == RowKind::Extract || rows[g_focus].kind == RowKind::OpenTex ||
+                                        rows[g_focus].kind == RowKind::ShareLog || rows[g_focus].kind == RowKind::CopyLog))) {
     const bool ex = g_focus >= 0 && g_focus < int(rows.size()) && rows[g_focus].kind == RowKind::Extract;
     const bool op = g_focus >= 0 && g_focus < int(rows.size()) && rows[g_focus].kind == RowKind::OpenTex;
-    const char* name = it ? it->label : restart ? "Restart the game" : ex ? "Extract the game's textures" : op ? "Open the textures folder" : "Version";
+    const bool sh = g_focus >= 0 && g_focus < int(rows.size()) && rows[g_focus].kind == RowKind::ShareLog;
+    const bool cp = g_focus >= 0 && g_focus < int(rows.size()) && rows[g_focus].kind == RowKind::CopyLog;
+    const char* name = it ? it->label : restart ? "Restart the game" : ex ? "Extract the game's textures" : op ? "Open the textures folder"
+                     : sh ? "Send the log" : cp ? "Copy the log" : "Version";
     std::string help = it ? it->help : restart ? "Closes the game and starts it again with the same settings (saved first)."
                      : ex ? "Saves every texture of the game as a picture in textures" RT_S "Original (a few minutes; the game keeps running). Edit a copy, put it in textures" RT_S "Custom."
                      : op ? "Opens the textures folder next to the game: Original (the game's own pictures) and Custom (your edits)."
+                     : sh ? "Hands this run's log - and the report of a previous crash, if there is one - to any app on the phone: a messenger, mail, Drive. Nothing to install, no cable."
+                     : cp ? "Puts the last 400 lines into the clipboard, to paste into a message. Crashes before this one are kept in the crashes folder."
                      : std::string("This build: ") + build_info::text() + ". Quote it in bug reports.";
     if (it && it->restart == 2)   // changed since the menu opened: say plainly that it waits for a restart (no pop-up, user)
       help += g_boot_set && raw_value(*it) != g_boot[it - ms::kItems] ? " Takes effect after you restart the game (System page > Restart the game)."
@@ -834,8 +886,11 @@ void draw_hints(ImDrawList* dl, const Layout& L, float alpha) {
   // controller hints
   struct H { const char* g1; const char* g2; const char* label; };
   std::vector<H> hs;
-  const bool exr = g_focus >= 0 && g_focus < int(rows.size()) && (rows[g_focus].kind == RowKind::Extract || rows[g_focus].kind == RowKind::OpenTex);
-  const char* a = exr ? (rows[g_focus].kind == RowKind::Extract ? "Extract" : "Open") : restart ? "Restart" : it && is_switch(*it) ? "Switch" : it && is_list(*it) ? "Choose" : it && it->kind == ms::Kind::Path ? "Browse" : "Change";
+  const bool exr = g_focus >= 0 && g_focus < int(rows.size()) && (rows[g_focus].kind == RowKind::Extract || rows[g_focus].kind == RowKind::OpenTex ||
+                                                                  rows[g_focus].kind == RowKind::ShareLog || rows[g_focus].kind == RowKind::CopyLog);
+  const char* a = exr ? (rows[g_focus].kind == RowKind::Extract ? "Extract" : rows[g_focus].kind == RowKind::OpenTex ? "Open"
+                        : rows[g_focus].kind == RowKind::ShareLog ? "Send" : "Copy")
+                : restart ? "Restart" : it && is_switch(*it) ? "Switch" : it && is_list(*it) ? "Choose" : it && it->kind == ms::Kind::Path ? "Browse" : "Change";
   if (pact) a = fk == RowKind::PresetNew ? "New" : fk == RowKind::PresetSave ? "Save" : fk == RowKind::PresetRename ? "Rename" : "Delete";
   if (!info) hs.push_back({"A", nullptr, g_list ? "Select" : a});
   hs.push_back({"B", nullptr, "Back"});

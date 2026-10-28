@@ -2,6 +2,27 @@
 
 ## Unreleased
 
+- **A crash is no longer a blank window: it is a log you can send.** Every run leaves a marker in the app's folder and
+  removes it on the way out. If the marker is still there at the next start, the run before it did not finish, and its log
+  is kept as `crashes/crash-<time>.txt` when the runtime's own fault line (`[crash] host signal 11 (SIGSEGV)` and the guest
+  backtrace, written by `rt_sys.cpp`) is in it, or as `crashes/stop-<time>.txt` when the log simply stops - Android closed
+  the app in the background or the phone ran out of memory, which is a different answer. `runtime/crash_report.cpp` also
+  records Aurora's fatal renderer errors (`fatal-<time>.txt`), and the launcher installs an uncaught-exception handler on
+  the Java side (`JavaCrash.java`), so a bug in the launcher's own UI is written down too.
+- **"Send the log" - no cable, no adb.** The launcher has a "Something went wrong?" section with "Send the log…" (the
+  phone's share sheet: a messenger, mail, Drive) and "Copy the log" (the clipboard), and the in-game menu has the same two
+  rows under System > Logs. Both hand over the newest log on the phone - which, after a crash, is the report of the run
+  that crashed. The file goes out through a small content provider of our own (`LogProvider.java`), because since Android 7
+  an app may not pass a file path to another app; no AndroidX dependency is added for it.
+- **Updates install over the app: nothing is lost, nothing to import again.** The build used to be signed with Gradle's
+  debug key, which is generated fresh on every machine - so each CI APK had a different signature, Android refused to
+  update the installed app, and the only way forward was an uninstall (settings, saves and the imported disc image with it).
+  The port now ships one fixed, committed key (`android/shadow-key.p12`, `android/shadow-signing.properties`; it is not a
+  secret and protects nothing - it only makes the same app updatable) used by both the debug and the release build, and the
+  CI passes this run's number as `versionCode`, so each artifact is a newer version than the one before. Installing a new
+  APK over the old one keeps the disc image, the settings and the saves; the launcher shows the version it is running, so
+  an update can be told from an install.
+
 - **OpenGL ES everywhere, Vulkan never.** Android now asks Dawn for OpenGL ES on every phone instead of trying Vulkan
   first (`aurora.cpp` backend order, `gx_lle.cpp` init), and the "Graphics API" row is gone from the settings because
   there is nothing left to choose: the port is built and tuned against GLES, and a phone's GL driver is the path its

@@ -4,6 +4,7 @@
 // command processor, translating the few things that are host-pointer based in Aurora
 // (vertex arrays, textures, TLUTs, EFB copies).
 #include "sys.h"
+#include "crash_report.h"
 #include "hw.h"
 #include "rt_sched.h"
 #include "gx_lle.h"
@@ -1624,7 +1625,14 @@ static void log_cb(AuroraLogLevel level, const char* module, const char* message
   if (len >= 11 && strstr(std::string(message, len).c_str(), "display copy")) return;   // logged every frame (handled by us)
   static const char* names[] = {"DEBUG", "INFO", "WARN", "ERROR", "FATAL"};
   logf("[aurora %s %s] %.*s\n", names[level], module, (int)len, message);
-  if (level == LOG_FATAL) { fflush(stderr); _exit(4); }
+  if (level == LOG_FATAL) {
+    // The renderer refused to go on (a validation error, a lost device): keep the reason with the log before the process
+    // leaves, so the phone has a report to send even if the app is never started again (crash_report.cpp).
+    crash_report::fatal((std::string(module) + ": " + std::string(message, len)).c_str());
+    crash_report::finish();   // one report, not two: do not let the next start treat this as an unexplained kill
+    fflush(stderr);
+    _exit(4);
+  }
 }
 
 SDL_Window* g_window = nullptr;

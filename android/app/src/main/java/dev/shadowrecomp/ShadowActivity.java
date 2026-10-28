@@ -38,6 +38,16 @@ public class ShadowActivity extends SDLActivity {
         sArgs = (args == null || args.isEmpty()) ? new String[0] : args.split("\u0001");
     }
 
+    /**
+     * Called from the native side (runtime/android_jni.cpp) when "Send the log" is chosen in the in-game menu.
+     *
+     * The name and the empty signature are the contract with that call: changing either breaks it at run time, not at
+     * compile time, so keep them in step with android_share_log().
+     */
+    public void shareLatestLog() {
+        LogSharing.share(this);
+    }
+
     @Override
     protected String[] getLibraries() {
         return new String[]{"SDL3", "main"};
@@ -56,6 +66,7 @@ public class ShadowActivity extends SDLActivity {
 
     @Override
     protected void onCreate(android.os.Bundle savedInstanceState) {
+        JavaCrash.install(this);   // SDL's Java side is ours too: a crash there leaves a file to send
         super.onCreate(savedInstanceState);
         // A game is played, not read: never let the screen time out under a thumb.
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);

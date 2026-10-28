@@ -7,6 +7,7 @@
 #include "first_run.h"
 #include "perf.h"
 #include "touch.h"
+#include "crash_report.h"
 #include "plat.h"
 #ifdef _WIN32
 #include <shellapi.h>
@@ -171,6 +172,10 @@ int main(int argc, char** argv) {
 #endif
     if (!console || getenv("SHADOW_LOG_TO_FILE")) redirect_log_to_file();
   }
+  // A crash is a log nobody can read on a phone: report on the previous run's log and leave this run's marker behind
+  // (crash_report.cpp), so "it closed by itself" has an answer in the launcher. Started here, right after the log exists,
+  // so a failure anywhere after this point - including the boot itself - is caught.
+  crash_report::start();
   // #164 (user: "tabbing out still causes massive lag and audio stutters"): reproduced only with something else busy -
   // a background test game (focus_test.py: 125 fps focused -> 88 tabbed out, audio under-runs). Once the window is not
   // in front, Windows favours the foreground app and our game competes as an equal with every other busy process. The
@@ -222,7 +227,12 @@ int main(int argc, char** argv) {
   (void)have_disc_arg;
   extern void profiler_start_if_requested();
   profiler_start_if_requested();
-  if (!boot_init(root)) return 1;
+  if (!boot_init(root)) {
+    // The game came up far enough to have a log but not to run: keep that log with the reason (crash_report.cpp).
+    crash_report::fatal("the game could not start");
+    crash_report::finish();
+    return 1;
+  }
   static Cpu cpu;
   memset(&cpu, 0, sizeof cpu);
   cpu.msr = 0x2030;
@@ -235,5 +245,6 @@ int main(int argc, char** argv) {
   logf("[boot] starting guest at 80003154\n");
   f_80003154(cpu);
   logf("[boot] guest returned\n");
+  crash_report::finish();
   return 0;
 }

@@ -75,6 +75,9 @@ void android_set_info(const std::string& kv);
 void android_toast(const char* text);            // a short Android toast / a log line on the desktop
 void android_keep_screen_on(bool on);
 void android_set_requested_orientation(int landscape);   // 0 = device default, 1 = landscape, 2 = portrait
+// "Send the log": asks the Java side (LogSharing.java) to open the phone's share sheet with the newest log file attached.
+// False on the desktop and when there is nothing to share yet - the caller then falls back to the clipboard.
+bool android_share_log();
 
 }  // namespace plat
 

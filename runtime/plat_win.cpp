@@ -152,6 +152,7 @@ void android_set_info(const std::string&) {}
 void android_toast(const char* text) { OutputDebugStringA(text ? text : ""); }
 void android_keep_screen_on(bool) {}
 void android_set_requested_orientation(int) {}
+bool android_share_log() { return false; }   // the clipboard (game_menu.cpp) is the desktop's way to hand over the log
 
 }  // namespace plat
 

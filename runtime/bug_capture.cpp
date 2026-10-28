@@ -47,10 +47,17 @@ std::string g_dir;           // the capture in progress (waiting for its screens
 uint64_t g_started = 0;
 bool ram(uint32_t a) { return a >= 0x80000000u && a < RT_RAM_END - 0x100; }
 std::string exe_dir() {
+#if defined(__ANDROID__)
+  // There is no executable path on Android, and the Win32 shim is not reliable there: the capture belongs in the app's
+  // own folder, next to the settings and the disc image (the launcher passes it as --data-dir), where the launcher's
+  // "Send the log" finds it too.
+  return plat::base_dir();
+#else
   char exe[MAX_PATH];
   GetModuleFileNameA(nullptr, exe, MAX_PATH);
   std::string d = exe;
   return d.substr(0, d.find_last_of("\\/"));
+#endif
 }
 std::string json_str(const std::string& s) {
   std::string o = "\"";

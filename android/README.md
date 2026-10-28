@@ -221,9 +221,56 @@ A phone has no console, so the port answers questions with the screen instead:
   * The overlay also counts **3D draws per second** (the world) against **2D draws per second** (the HUD): a stage that
     is drawing thousands of world triangles and showing black has a different cause from one that submits none.
 
+## Installing an update (never uninstall)
+
+A new APK installs **over** the one on the phone: open it from the notification or the file manager and press
+**Update**. The disc image, the settings and the saves are in the app's private folder and are left alone, so there is
+nothing to import again.
+
+That works only because every build is signed with the same key and every build has a bigger version code:
+
+* `android/shadow-key.p12` + `android/shadow-signing.properties` - the port's own key, committed on purpose. It is not a
+  secret, it protects nothing, and it cannot pass for another app; its only job is to be the *same* key on every build.
+  (Gradle's debug key - what the CI used before - is generated fresh on every machine, which is why every update used to
+  end in "App not installed" and an uninstall, taking the disc image with it.) To use your own key instead, put a
+  `android/keystore.properties` next to it with `storeFile`, `storeType`, `storePassword`, `keyAlias`, `keyPassword`; it
+  wins. To regenerate the port's key, `python3 tools/android/make_keystore.py --force` - and expect one more uninstall.
+* `versionCode` comes from the CI run number (`-Pshadow.versionCode=...` in the workflow), so every artifact is newer than
+  the previous one. Locally, `./build.sh apk --version-code 42` or `SHADOW_VERSION_CODE=42` does the same. The launcher's
+  footer shows the version it is running, so an update can be told from a fresh install.
+
+If Android still refuses with "App not installed", the installed app was signed with a different key (an APK from before
+this change), and one uninstall is unavoidable: export the log first, and copy the disc image out if you need it.
+
+## When the game closes by itself: send the log
+
+A phone has no console and no cable, so the port keeps the answer on the phone and hands it over in two taps:
+
+* **The launcher** has a *Something went wrong?* section: **Send the log…** opens the phone's share sheet (a messenger,
+  mail, Drive - anything that takes a file) with the newest log attached, and **Copy the log** puts the last 400 lines
+  into the clipboard to paste into a message. If the previous run ended badly the section says so first, and the file sent
+  is that run's report.
+* **In the game:** *MENU → System → Logs → Send the log / Copy the log*.
+
+What is kept:
+
+| File | Written when |
+| --- | --- |
+| `files/logs/shadow-<date>.log` | every run, from the first line (`SHADOW_LOG_PATH`) |
+| `files/crashes/crash-<date>.txt` | the previous run did not finish **and** its log ends with the runtime's own fault line (`[crash] host signal 11 (SIGSEGV)`, `FATAL`, `abort`) - plus the guest backtrace it wrote |
+| `files/crashes/stop-<date>.txt` | the previous run did not finish with no error at all: Android closed the app in the background, or the phone ran out of memory - a different answer, and worth knowing |
+| `files/crashes/fatal-<date>.txt` | the renderer refused something and stopped the game on purpose |
+| `files/crashes/java-<date>.txt` | the Android/Java side threw an uncaught exception (`JavaCrash.java`), with its stack trace |
+| `files/bugs/<date>/` | the bug report key: screenshot, game state, settings, log |
+
+How the port knows: every run drops a `run.open` marker in the app's folder and removes it on the way out (including the
+fast-exit path in `sys_exit_guarded`, which never runs the normal teardown). A marker found at the next start is the
+previous run failing to finish - `runtime/crash_report.cpp`.
+
 ## Known limits
 
 * Only the USA first release (`GUPE8P`) works: the recompiled code is that build's.
 * 32-bit-only devices are not supported and not built.
-* The launcher is plain Android widgets (no AndroidX): fewer dependencies, smaller APK.
+* The launcher is plain Android widgets (no AndroidX): fewer dependencies, smaller APK. The log leaves the app through
+  `LogProvider.java`, a plain `ContentProvider` written for exactly that, not through AndroidX's FileProvider.
 * `android/PORT-STATUS.md` keeps the running list of what is left.

@@ -54,5 +54,13 @@
                 <action android:name="android.hardware.usb.action.USB_DEVICE_ATTACHED" />
             </intent-filter>
         </activity>
+        <!-- Hands the log to whichever app the player picks in the share sheet (LogSharing.java). Not exported: the
+             read permission is granted per intent, only to that app. -->
+        <provider
+            android:name=".LogProvider"
+            android:authorities="dev.shadowrecomp.logs"
+            android:exported="false"
+            android:grantUriPermissions="true" />
+
     </application>
 </manifest>

@@ -216,6 +216,12 @@ void android_keep_screen_on(bool on) {
 
 void android_set_requested_orientation(int landscape) { (void)landscape; }
 
+#ifndef __ANDROID__
+// Android's version is in android_jni.cpp, which is where the JNI code lives (this file is also the Linux developer
+// build's backend, where there is no share sheet).
+bool android_share_log() { return false; }
+#endif
+
 }  // namespace plat
 
 // ---------------------------------------------------------------------------------------------------------------------
