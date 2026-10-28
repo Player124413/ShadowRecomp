@@ -22,7 +22,9 @@ with a finger. No game files are in the repository.
 | Frame pacing | `runtime/frame_rate.cpp` | sleeps to the frame deadline on Android instead of spinning (FR_NO_PACE=1 A/B) |
 | Fonts | `runtime/game_menu.cpp` | the phone's own Roboto when the Windows fonts are absent (menu stays readable) |
 | ETC2 textures | `third_party/aurora/lib/gfx/etc2_encode.cpp`, `etc2_transcode.cpp`, `upload_churn.hpp`, `texture.cpp` | CMPR (BC1) textures are decoded to RGBA8 as before and then re-encoded to ETC2 instead of being uploaded as 32-bit RGBA8: 4 bits per pixel instead of 32, plus an EAC alpha block only when the texture uses alpha. Falls back to RGBA8 when the adapter has no `TextureCompressionETC2` or the format is not worth the loss. `SHADOW_ETC2=1` forces every RGB source through it, `=0` turns it off; `Display > Picture > Compressed textures` switches it at runtime, and the first log line says which way it went and whether the GPU reported the feature. The encoder runs at about 2 us per 4x4 block (it was 16), and a texture that is re-uploaded every frame - a movie frame - is left uncompressed (`upload_churn.hpp`), since encoding it per frame costs more than the bandwidth it saves |
-| Adaptive resolution | `runtime/dynamic_resolution.{h,cpp}`, `runtime/gx_lle.cpp` | render height follows delivered frame times (on for Android), 720-line cap while a movie streams |
+| Adaptive resolution | `runtime/dynamic_resolution.{h,cpp}`, `runtime/gx_lle.cpp` | render height follows delivered frame times (on for Android), 720-line cap while a movie streams; the floor is 50 % of the choice, or 40 % when the automatic quality unlocks it |
+| Graphics API | `third_party/aurora/lib/aurora.cpp`, `runtime/gx_lle.cpp` | **OpenGL ES only**: the port asks Dawn for GLES on every launch and the settings no longer offer a choice. Vulkan stays compiled as Aurora's last-resort fallback only (a phone whose GL driver refuses to start); `SHADOW_BACKEND=vulkan` is the diagnostic override |
+| Automatic quality | `runtime/perf_auto.{h,cpp}`, `perf_auto_core.h`, `tools/android/perf_auto_test.cpp` | when the frame times stay above the target, drops the glow pass, then lowers the resolution floor to 40 %; gives both back when comfortable. Ignores one-off hitches, keeps a quiet minute between changes, backs off (up to 8x) from a level that was too slow. On by default on Android, `SHADOW_AUTO=0` off; decisions tested off-device in CI |
 | CI | `.github/workflows/android-apk.yml`, `tools/android/stub_generated.py`, `tools/android/ci_errors.py` | GitHub Actions, three jobs: the disc-free tests; a full arm64 compile of the native port without the disc; and an APK that is really built and uploaded on every push - the real one when `SHADOW_GEN_URL` holds your `generated/` tarball, otherwise a launcher-only one that links stand-ins for the game code (so the packaging path is never untested). Failures come back as check-run annotations carrying the include chain, the failing command and the linker's complaints |
 
 ## Verified here, and what still needs a device
@@ -66,7 +68,7 @@ the list below (logcat tags `SDL`, `ShadowRecomp`).
 ## Next, in order
 
 1. **First boot on a device.** Install the APK (own disc + `SHADOW_GEN_URL`, or `android/build.sh` on a machine with the
-   NDK), watch logcat, and fix what the phone says: Dawn's Vulkan surface on Android, audio device, frame pacing.
+   NDK), watch logcat, and fix what the phone says: Dawn's GLES surface on Android, audio device, frame pacing.
 2. **ETC2 quality: the extra modes.** The encoder uses ETC1's two modes (individual and differential) plus EAC alpha.
    ETC2's T, H and planar modes are what etcpak uses, and the gap is measurable: on synthetic 128x128 images, decoded by
    the same independent decoder, ours is 41.7 dB against etcpak's 49.8 dB on a gradient and 11.6 vs 14.7 dB on
