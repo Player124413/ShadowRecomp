@@ -66,6 +66,10 @@ void set_present_viewport(const wgpu::RenderPassEncoder& pass, const gfx::Viewpo
 #endif
 
 #ifdef AURORA_ENABLE_GX
+// Android: OpenGL ES first, always. Aurora used to try Vulkan first on every phone; on the drivers this port runs on,
+// GLES is both the faster path (no Vulkan driver thread, no per-draw descriptor sets) and the one the whole ecosystem is
+// tested against, so it is the default and the only API the settings offer. Vulkan stays in the list as the last resort
+// so a phone whose GL driver refuses to start still boots instead of showing nothing.
 constexpr std::array PreferredBackendOrder{
 #ifdef ENABLE_BACKEND_WEBGPU
     BACKEND_WEBGPU,
@@ -76,6 +80,9 @@ constexpr std::array PreferredBackendOrder{
 #ifdef DAWN_ENABLE_BACKEND_METAL
     BACKEND_METAL,
 #endif
+#if defined(__ANDROID__) && defined(DAWN_ENABLE_BACKEND_OPENGLES)
+    BACKEND_OPENGLES,
+#endif
 #ifdef DAWN_ENABLE_BACKEND_VULKAN
     BACKEND_VULKAN,
 #endif
@@ -85,7 +92,7 @@ constexpr std::array PreferredBackendOrder{
 // #ifdef DAWN_ENABLE_BACKEND_DESKTOP_GL
 //     BACKEND_OPENGL,
 // #endif
-#ifdef DAWN_ENABLE_BACKEND_OPENGLES
+#if !defined(__ANDROID__) && defined(DAWN_ENABLE_BACKEND_OPENGLES)
     BACKEND_OPENGLES,
 #endif
 #ifdef DAWN_ENABLE_BACKEND_NULL

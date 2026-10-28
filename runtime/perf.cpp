@@ -11,6 +11,7 @@
 // every value is in the in-game menu too.
 #include "perf.h"
 #include "dynamic_resolution.h"
+#include "perf_auto.h"
 #include "settings_ui.h"
 #include "gx_lle.h"
 #include "plat.h"
@@ -115,6 +116,7 @@ void apply(const char* preset) {
   g_tier = name;
   gxlle::g_render_height = settings::g.height;
   drs::reset();
+  perf_auto::reset();
   logf("[perf] preset %s (device: %s): %d lines, draw %d%% / objects %d%%, bloom %d, AO %d, lighting %d\n",
        g_tier.c_str(), plat::android_info().c_str(), settings::g.height, settings::g.draw_distance,
        settings::g.draw_objects, (int)settings::g.game_bloom, (int)settings::g.ao, (int)settings::g.light);
@@ -128,6 +130,7 @@ void apply_render_scale(int scale) {
   else settings::g.height = 0;
   gxlle::g_render_height = settings::g.height;
   drs::reset();   // a new height to adapt down from
+  perf_auto::reset();
   logf("[perf] render height %d (launcher: %s)\n", settings::g.height,
        settings::g.height == 0 ? "native" : scale == 1 ? "50 %" : "75 %");
 }

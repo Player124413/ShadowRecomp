@@ -2,11 +2,24 @@
 
 ## Unreleased
 
-- **Graphics API is now a setting: Auto (Vulkan, then OpenGL ES), Vulkan, or OpenGL ES** (Settings > Display >
-  Screen > "Graphics API", `SHADOW_BACKEND=vulkan|gles` for a script). The port asks Dawn for Vulkan on Android and only falls
-  back to OpenGL ES if Vulkan refuses to start, so a driver bug in one of them looks like a driver bug in "the game" -
-  now one tap on the other API says which. The frame-rate overlay names the API and the adapter in use (that answer used
-  to be three log lines deep).
+- **OpenGL ES everywhere, Vulkan never.** Android now asks Dawn for OpenGL ES on every phone instead of trying Vulkan
+  first (`aurora.cpp` backend order, `gx_lle.cpp` init), and the "Graphics API" row is gone from the settings because
+  there is nothing left to choose: the port is built and tuned against GLES, and a phone's GL driver is the path its
+  vendor actually tests. Vulkan stays compiled in as Aurora's last-resort fallback only, so a phone whose GL driver
+  refuses to start still boots; `SHADOW_BACKEND=vulkan` overrides it for a diagnostic run. A settings file from the
+  previous build has its saved choice dropped (settings version 3).
+- **Automatic quality: the port keeps the frame rate by itself.** `runtime/perf_auto.cpp` watches the frame times the
+  phone actually delivers. When they stay late even with adaptive resolution at its floor, it gives up the game's glow
+  pass (a full-screen additive pass plus the copy that feeds it), and, if that is not enough, lets the resolution floor go
+  from 50 % of the chosen height to 40 % - then hands both back once the phone has held the frame rate for a while. It
+  is on by default on Android, off on the desktop (`SHADOW_AUTO=0` turns it off), it never acts on a single hitch, it
+  never changes anything twice in a row without a quiet minute, and a level that turns out to be too slow is not retried
+  for up to eight minutes - every change is logged (`[auto] 47 fps: glow off`) and shown in the frame-rate overlay, so a
+  "still slow" report says what the phone already tried. `tools/android/perf_auto_test.cpp` plays synthetic phones (a
+  fast one, a 40 fps one, a hopeless one, one with a stage-load hitch) through the decision logic in CI.
+- **OpenGL ES specifics that came with it:** the world's per-draw index scan (`gx_lle.cpp scan_draw_indices`) is skipped
+  for draws with no indexed attribute at all - every 2D, HUD and effect draw of the frame - instead of walking their
+  vertices to learn nothing.
 - **Diagnostics for a black or missing world, on the phone itself**: the overlay counts world (3D) and HUD (2D) draws
   per second - a picture that keeps drawing is a different problem from a stage that submits nothing - plus two switches
   ("Draw both sides", "Ignore the depth buffer") that build new pipelines immediately, so culling and depth can be ruled

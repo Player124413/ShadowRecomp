@@ -27,4 +27,9 @@ double scale();
 // Forget the history (a new stage, a display change): the next frames start from the player's height again.
 void reset();
 
+// How far down the scale is allowed to go (0.50 by default). perf_auto.cpp lowers it to 0.40 when the frame rate is
+// still missed with everything else taken away: on a GPU-bound phone, fewer pixels is the only lever left.
+void set_min_scale(double scale);
+double min_scale();
+
 }  // namespace drs

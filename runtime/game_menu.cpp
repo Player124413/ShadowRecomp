@@ -11,6 +11,7 @@
 #include "cheats.h"
 #include "sys.h"
 #include "gx_lle.h"
+#include "perf_auto.h"
 #include "build_info.h"
 #include "texture_extract.h"
 #include "movement.h"
@@ -155,6 +156,7 @@ void after_change(const ms::Item& it) {
     settings::g.draw_distance = 100;
     logf("[menu] original game logic on: view distance and object distance back to 100%%\n");
   }
+  if (k == "auto_perf" && !settings::g.auto_perf) perf_auto::reset();   // switched off: everything it took away comes back now
   if (k == "game_bloom" || k == "light" || k == "light_replace" || k == "light_replace_bloom")   // #143: the renderer's copy, live
     gxlle::g_game_bloom = settings::g.game_bloom && !(settings::g.light && settings::g.light_replace && settings::g.light_replace_bloom);
   g_save_at = now_s() + 0.4;

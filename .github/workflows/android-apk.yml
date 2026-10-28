@@ -109,6 +109,12 @@ jobs:
               -o /tmp/touch_layout_test
           /tmp/touch_layout_test
 
+      - name: Automatic quality governor (synthetic phones, no GPU)
+        run: |
+          g++ -std=c++20 -O2 -Wall -Wextra -Iruntime \
+              tools/android/perf_auto_test.cpp -o /tmp/perf_auto_test
+          /tmp/perf_auto_test
+
       - name: Per-frame upload detection (no GPU, fake clock)
         run: |
           g++ -std=c++20 -O2 -Wall -Wextra -Ithird_party/aurora/lib \

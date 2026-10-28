@@ -9,8 +9,8 @@ Display|light|Real-time shadows|bool|0|[Experimental] Real shadows cast by the w
 Display|fullscreen|Full screen|bool|0|Fill the whole screen. You can also press F11 or Alt+Enter.
 Display|fps_target|Frame rate|choice:30=30,48=48,60=60,72=72,90=90,100=100,120=120,144=144,165=165,200=200,240=240,300=300,360=360,500=500,0=Unlimited|0|Pictures per second; the game speed stays the same. Unlimited can make sound stutter on slow PCs.
 Display|show_fps|Show frame rate|bool|0|Shows the frame rate in a corner of the screen.
+Display|auto_perf|Keep the frame rate automatically|bool|0|If a stage is too slow, the glow and then some resolution are given up to hold 60; they come back later.
 Display|cutscene_fps_cap|Cutscene smoothness|choice:60=60 (original),0=Same as the game|0|Cutscenes were made for 60. "Same as the game" can make them judder above 60.
-Display|render_backend|Graphics API|choice:0=Auto,1=Vulkan,2=OpenGL ES|2|Auto asks Vulkan, then falls back to OpenGL ES. The overlay shows which one. Restart to apply.
 ## View
 Display|fov_percent|Field of view|int:70:150:5|0|How wide the camera sees. 100% is the original.
 Display|draw_distance|View distance|int:100:400:5|0|How far away the world is drawn. 100% is the original; more can lower the frame rate.

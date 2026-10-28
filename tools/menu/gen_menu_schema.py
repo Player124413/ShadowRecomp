@@ -57,6 +57,7 @@ INTERNAL = {'mv_name': "the movement preset's name (movement_presets.ini / F2 Tw
             'ao': '#148 contact AO, left out by the user for now (the menu shows the greyed light_ao WIP row)',
             'ao_strength': 'goes with ao (#148, not in the menu yet)',
             'clip_ui_43': '#149: always on (hides HUD pieces the game parks just outside 4:3); the one bars toggle is cutscene_bars',
+            'render_backend': 'OpenGL ES only now (gx_lle.cpp forces it); SHADOW_BACKEND=vulkan exists for a diagnostic run',
             'dynamic_resolution': 'follows the frame times by itself (runtime/dynamic_resolution.cpp); SHADOW_DRS=0 turns it off',
             'settings_version': 'the ini format version the migration reads, not a player setting',
             'pause_new': "retired #149 (user: remove the new pause menu): the game's own pause is always used; old ini lines are ignored",

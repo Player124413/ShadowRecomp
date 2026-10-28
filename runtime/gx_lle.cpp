@@ -12,6 +12,7 @@
 #include "lighting_contact_ao.h"
 #include "lighting.h"
 #include "dynamic_resolution.h"
+#include "perf_auto.h"
 
 #include <aurora/aurora.h>
 #include <aurora/event.h>
@@ -751,6 +752,12 @@ static void scan_draw_indices(const uint8_t* p, uint32_t count, int fmt) {
     plan[np++] = {0, (uint8_t)(t == GX_INDEX8 ? 1 : 2), (uint8_t)((i == GX_VA_NRM && af.cnt == GX_NRM_NBT3) ? 3 : 1), (int8_t)(a >= 0 && a < 16 ? a : -1)};
     if (a >= 0 && a < 16) used[a] = true;
   }
+  // Direct (inline) attributes need no array growth, so a draw that has none indexed has nothing to scan: on a phone
+  // this skips a per-vertex walk for every 2D/HUD/effect draw of the frame (the world's draws are indexed and still
+  // walk, they are what this is for).
+  bool any_indexed = false;
+  for (int a = 0; a < 16; ++a) any_indexed |= used[a];
+  if (!any_indexed) return;
   for (uint32_t v = 0; v < count; ++v) {
     for (int j = 0; j < np; ++j) {
       const Step& st = plan[j];
@@ -1548,7 +1555,10 @@ void present_frame() {
     const int before = effective_render_height();
     if (last_present != 0 && now > last_present && !g_launcher_mode) {
       const int fps = settings::g.fps_target > 0 ? settings::g.fps_target : 60;
-      drs::tick((double)(now - last_present) * 1e-9, 1.0 / (double)fps);
+      const double seconds = (double)(now - last_present) * 1e-9;
+      const double target = 1.0 / (double)fps;
+      drs::tick(seconds, target);
+      perf_auto::tick(seconds, target);   // automatic quality: spends the glow and the resolution floor (perf_auto.cpp)
     }
     if (effective_render_height() != before || movie != last_movie) {
       apply_display_settings(movie != last_movie ? false : true);
@@ -1764,24 +1774,23 @@ void init_window() {
   cfg.windowHeight = 960;
   cfg.mem1Size = 0;
   cfg.mem2Size = 0;
-  // Graphics API (Settings > Graphics > "Graphics API"): Android has Vulkan and OpenGL ES; Auto lets Aurora try Vulkan
-  // first and fall back. Forcing one is a diagnostic for a driver that draws the world wrong on one of them.
-  // SHADOW_BACKEND=vulkan|gles does the same without touching the settings file (adb shell, a launcher script, a
-  // desktop shortcut): useful before the menu can be reached at all.
-  int backend_choice = settings::g.render_backend;
+  // Graphics API: OpenGL ES, on every phone, always. Vulkan is not offered any more - it was the default and the one
+  // that drew the world wrong, and the port is built and tuned against GLES (Dawn's GLES backend needs no driver thread
+  // and no per-draw descriptor sets, and a phone's GL driver is the path its vendor actually tests). Aurora still keeps
+  // Vulkan as the last resort behind this, so a phone whose GL driver refuses to start boots instead of showing nothing.
+  // SHADOW_BACKEND=vulkan|auto overrides it for a diagnostic run.
+  cfg.desiredBackend = BACKEND_OPENGLES;
   if (const char* env_backend = getenv("SHADOW_BACKEND")) {
-    if (!strcmp(env_backend, "vulkan")) backend_choice = 1;
-    else if (!strcmp(env_backend, "gles") || !strcmp(env_backend, "opengles")) backend_choice = 2;
-    else if (!strcmp(env_backend, "auto")) backend_choice = 0;
+    if (!strcmp(env_backend, "vulkan")) cfg.desiredBackend = BACKEND_VULKAN;
+    else if (!strcmp(env_backend, "auto")) cfg.desiredBackend = BACKEND_AUTO;
   }
-  switch (backend_choice) {
-  case 1: cfg.desiredBackend = BACKEND_VULKAN; break;
-  case 2: cfg.desiredBackend = BACKEND_OPENGLES; break;
-  default: cfg.desiredBackend = BACKEND_AUTO; break;
-  }
-  if (cfg.desiredBackend != BACKEND_AUTO) {
-    logf("graphics API: %s (forced by the settings)\n", cfg.desiredBackend == BACKEND_VULKAN ? "Vulkan" : "OpenGL ES");
-  }
+#ifndef __ANDROID__
+  // Desktop builds keep the platform's own choice (D3D12 on Windows, Metal on macOS, Vulkan on Linux).
+  if (!getenv("SHADOW_BACKEND")) cfg.desiredBackend = BACKEND_AUTO;
+#endif
+  logf("[gx] graphics API: %s\n", cfg.desiredBackend == BACKEND_OPENGLES ? "OpenGL ES"
+                                     : cfg.desiredBackend == BACKEND_VULKAN ? "Vulkan (SHADOW_BACKEND)"
+                                                                            : "auto");
   cfg.vsync = false;
   cfg.hdr = settings::g.hdr;                  // HDR output groundwork (Aurora gpu.cpp: FP16 scRGB + output transform)
   cfg.hdrPaperWhiteNits = (float)settings::g.hdr_paper_white;

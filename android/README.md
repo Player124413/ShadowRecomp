@@ -190,10 +190,14 @@ The target is a locked 60 fps, so the port is built for it rather than tuned aft
   ETC2 at load time and uploaded at 4 bits per pixel instead of 32, with an EAC alpha block only when the texture has
   alpha (`SHADOW_ETC2=1` forces it for all RGB sources, `=0` turns it off). The APK requires a GLES3 / Vulkan-class
   device, where ETC2 is guaranteed;
-* Dawn renders through Vulkan. Android builds also link Dawn's OpenGL ES backend, and that is the fallback when Vulkan
-  cannot start; Settings > Display > Screen > "Graphics API" (or `SHADOW_BACKEND=vulkan|gles`) forces one of them, which is the
-  first thing to try when the picture draws wrong on one driver. libc++ is linked statically, and the audio stream keeps
-  SDL's own device buffering.
+* Dawn renders through **OpenGL ES**. Vulkan was the default of the upstream layer this port is built on and is exactly
+  what used to draw the world black; the port now asks for GLES on every phone (`SHADOW_BACKEND=vulkan` exists only for a
+  diagnostic run, and Aurora keeps Vulkan as a last-resort fallback if a phone's GL driver refuses to start). libc++ is
+  linked statically, and the audio stream keeps SDL's own device buffering.
+* **Automatic quality** (`runtime/perf_auto.cpp`, "Keep the frame rate automatically" on the Screen page, on for a fresh
+  Android install): if a stage stays below the frame rate even with adaptive resolution at its floor, the game's glow
+  pass is dropped, then the resolution floor goes from 50 % to 40 %; both come back when the phone holds the frame rate
+  again. It ignores one-off hitches, changes at most once a minute, and logs every step (`[auto] 47 fps: glow off`).
 
 The launcher's settings travel as command-line arguments (`--disc`, `--perf`, `--render-scale`, `--touch`,
 `--edit-touch`, `--device-info`), so everything the phone does can be replayed on the desktop build verbatim.
@@ -202,8 +206,9 @@ The launcher's settings travel as command-line arguments (`--disc`, `--perf`, `-
 
 A phone has no console, so the port answers questions with the screen instead:
 
-* **Settings > Display > Screen > "Graphics API"**: Auto / Vulkan / OpenGL ES. The frame-rate overlay names the API and the
-  adapter it is actually using (`vulkan - Adreno (TM) 740`, `opengl es - Mali-G78`), so "which one is it" is one glance.
+* **The frame-rate overlay names the graphics API and the adapter** it is actually using (`OpenGL ES - Adreno (TM)
+  740`), and what the automatic quality has taken away (`auto quality: glow off`). The API is not a setting: it is
+  OpenGL ES on every phone.
 * **Settings > System > Bug reports**:
   * **Show log on the screen** draws the tail of the log over the picture, with error lines pinned in red at the top (a
     refused pipeline, a shader that failed to compile, a texture format the driver does not support). A screenshot of it

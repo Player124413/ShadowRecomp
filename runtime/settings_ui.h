@@ -28,10 +28,14 @@ struct Values {
   bool gauges_new = false;  // #143: the PC gauges were removed; always false (field kept until the menu schema drops it)
   bool hud_169 = false;     // #143: option removed, always false (the centred 4:3 HUD); the edge placement code stays unused (gx_lle.cpp hud_side_for)
   bool skip_any_cutscene = false;   // allow skipping cutscenes that have not been seen yet
-  // Which graphics API Aurora/Dawn asks for (needs a restart). Android has two: Vulkan, then OpenGL ES as the fallback.
-  // 0 auto = the same order the game has always used, 1 = force Vulkan, 2 = force OpenGL ES (diagnostics: a driver bug on
-  // one API makes the other one worth a try).
+  // The graphics API is not a setting any more: Android always uses OpenGL ES (gx_lle.cpp init_window), Vulkan is only
+  // the last-resort fallback inside Aurora. The ini key is still read so an old file loads, and SHADOW_BACKEND=vulkan
+  // exists for a diagnostic run; nothing in the UI exposes it.
   int render_backend = 0;
+  // Automatic quality (perf_auto.cpp): when the frame times stay above the target even at the resolution floor, the
+  // governor takes the glow pass away and lets the adaptive resolution go lower, then gives both back once the phone
+  // holds the frame rate comfortably. On by default on Android, where the hardware is not known in advance.
+  bool auto_perf = false;
   int compressed_textures = 0;      // ETC2 policy: 0 auto (a phone transcodes CMPR, a desktop does not), 1 never, 2 everything
   int settings_version = 0;         // the ini format this file was written with (load() migrates older ones)
   bool warp_enemy_counts = false;   // #141 default off; #108: checkpoint warp screen: a red number per hexagon = mission enemies left nearest it

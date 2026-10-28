@@ -16,7 +16,7 @@ namespace drs {
 namespace {
 
 constexpr int kWindow = 40;          // frames per decision (~0.7 s at 60 fps)
-constexpr double kMinScale = 0.50;   // never below half of the chosen height
+constexpr double kMinScale = 0.50;   // never below half of the chosen height (perf_auto.cpp can lower it to 0.40)
 constexpr int kMinHeight = 360;      // and never below 360 lines, whatever half of the choice is
 constexpr uint64_t kChangeCooldownNs = 450000000ull;   // between two changes
 constexpr uint64_t kReportNs = 5000000000ull;          // one "[drs]" line per 5 s: what a bug report needs
@@ -25,6 +25,7 @@ double g_samples[kWindow];
 int g_count = 0;
 int g_next = 0;
 double g_scale = 1.0;
+double g_min_scale = kMinScale;
 int g_slow_windows = 0;   // consecutive windows that were late
 uint64_t g_last_change = 0;
 uint64_t g_last_report = 0;
@@ -50,6 +51,16 @@ bool enabled() {
 
 double scale() { return g_scale; }
 
+void set_min_scale(double scale) {
+  g_min_scale = std::clamp(scale, 0.30, 1.0);
+  if (g_scale < g_min_scale) {   // a raised floor lifts the picture immediately, a lowered one only allows it
+    g_scale = g_min_scale;
+    g_count = 0;
+    g_next = 0;
+  }
+}
+double min_scale() { return g_min_scale; }
+
 void reset() {
   g_count = 0;
   g_next = 0;
@@ -63,7 +74,10 @@ int height_for(int wanted_height) {
   if (!enabled() || wanted_height <= 0 || g_scale >= 0.999) return wanted_height;
   int h = (int)std::lround(wanted_height * g_scale);
   h = (h / 8) * 8;   // whole blocks: the render grid and the EFB copies like them, and the log stays readable
-  return std::clamp(h, std::min(kMinHeight, wanted_height), wanted_height);
+  // The absolute floor follows the allowed floor: 360 lines at 50 %, 288 at the 40 % that perf_auto.cpp can unlock.
+  // Without this the 40 % floor would do nothing for the 540-line preset (0.4 x 540 = 216, still clamped to 360).
+  const int floor_h = (int)std::lround(kMinHeight * (g_min_scale / kMinScale));
+  return std::clamp(h, std::min(floor_h, wanted_height), wanted_height);
 }
 
 void tick(double frame_seconds, double target_seconds) {
@@ -94,10 +108,10 @@ void tick(double frame_seconds, double target_seconds) {
   }
 
   // Two late windows in a row (a real load, not a hitch) before the picture gets softer.
-  if (late && g_slow_windows >= 2 && g_scale > kMinScale) {
+  if (late && g_slow_windows >= 2 && g_scale > g_min_scale) {
     // Cost is roughly proportional to the pixel count, so the square root of the time ratio is the scale ratio.
-    const double want = std::clamp(g_scale * std::sqrt(target_seconds / med), kMinScale, g_scale * 0.92);
-    const double stepped = std::max(kMinScale, std::floor(want * 20.0) / 20.0);   // steps of 0.05
+    const double want = std::clamp(g_scale * std::sqrt(target_seconds / med), g_min_scale, g_scale * 0.92);
+    const double stepped = std::max(g_min_scale, std::floor(want * 20.0) / 20.0);   // steps of 0.05
     if (stepped < g_scale - 0.011) {
       logf("[drs] %.1f fps (target %.1f): render scale %.2f -> %.2f\n", fps, 1.0 / target_seconds, g_scale, stepped);
       g_scale = stepped;

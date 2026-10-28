@@ -2,6 +2,7 @@
 // pause menu / gauges, F3 texture viewer). The settings themselves are edited in the launcher (launcher.cpp).
 #include "settings_ui.h"
 #include "dynamic_resolution.h"
+#include "perf_auto.h"
 #include "game_menu.h"
 #include "bug_capture.h"
 #include "controls.h"
@@ -213,9 +214,10 @@ static void poll_live() {
 }
 
 // One ini key (load, and INPUT_FILE "SET key=value" in tests). False = unknown key.
-// Bumped when a default that older ini files carry has to change for everybody who updates: 2 = a phone's settings file
-// allows skipping cutscenes (see load()).
-constexpr int kSettingsVersion = 2;
+// Bumped when a default that older ini files carry has to change for everybody who updates (see load()):
+//   2 = a phone's settings file allows skipping cutscenes
+//   3 = OpenGL ES only (a saved Vulkan choice is dropped) and auto quality on for phones
+constexpr int kSettingsVersion = 3;
 
 static bool set_key(const char* key, int v) {
   if (!strcmp(key, "height")) g.height = v;
@@ -239,7 +241,8 @@ static bool set_key(const char* key, int v) {
   else if (!strcmp(key, "gauges_new")) {}   // #143 the PC gauges were removed: old ini lines are ignored
   else if (!strcmp(key, "skip_any_cutscene")) g.skip_any_cutscene = v != 0;
   else if (!strcmp(key, "compressed_textures")) g.compressed_textures = std::clamp(v, 0, 2);
-  else if (!strcmp(key, "render_backend")) g.render_backend = std::clamp(v, 0, 2);
+  else if (!strcmp(key, "render_backend")) g.render_backend = std::clamp(v, 0, 2);   // read, no longer shown (GLES only)
+  else if (!strcmp(key, "auto_perf")) g.auto_perf = v != 0;
   else if (!strcmp(key, "settings_version")) g.settings_version = v;
   else if (!strcmp(key, "warp_enemy_counts")) g.warp_enemy_counts = v != 0;
   else if (!strcmp(key, "fov_percent")) g.fov_percent = v;
@@ -290,7 +293,10 @@ void load() {
   FILE* f = fopen(ini_path().c_str(), "r");
   if (!f) {
     // no settings file yet: the phone's own defaults (see below)
-    if (plat::is_android()) g.skip_any_cutscene = true;
+    if (plat::is_android()) {
+      g.skip_any_cutscene = true;
+      g.auto_perf = true;   // a phone of unknown speed keeps the frame rate by itself (perf_auto.cpp)
+    }
     g.settings_version = kSettingsVersion;
     return;
   }
@@ -328,6 +334,12 @@ void load() {
   if (plat::is_android() && (!saw_skip_key || g.settings_version < kSettingsVersion)) {
     if (!g.skip_any_cutscene) logf("[settings] Android: skipping cutscenes is on from now on\n");
     g.skip_any_cutscene = true;
+  }
+  // OpenGL ES only: a file written by the build that had a "Graphics API" row may still ask for Vulkan.
+  if (plat::is_android() && g.settings_version < kSettingsVersion) {
+    if (g.render_backend == 1) logf("[settings] Android: OpenGL ES only, the saved Vulkan choice is dropped\n");
+    g.render_backend = 2;
+    g.auto_perf = true;
   }
   g.settings_version = kSettingsVersion;
   archive_lighting();
@@ -375,8 +387,8 @@ void save() {
   fprintf(f, "width=%d\nheight=%d\nwidescreen=%d\nfullscreen=%d\nfps_target=%d\nshow_fps=%d\nshow_log=%d\ndebug_no_cull=%d\ndebug_no_depth=%d\ndebug_no_restore=%d\ndebug_no_haze=%d\ngame_bloom=%d\n",
           g.width, g.height, (int)g.widescreen, (int)g.fullscreen, g.fps_target, (int)g.show_fps, (int)g.show_log,
           (int)g.debug_no_cull, (int)g.debug_no_depth, (int)g.debug_no_restore, (int)g.debug_no_haze, (int)g.game_bloom);
-  fprintf(f, "dynamic_resolution=%d\nsettings_version=%d\ncompressed_textures=%d\nrender_backend=%d\n",
-          (int)g.dynamic_resolution, kSettingsVersion, g.compressed_textures, g.render_backend);
+  fprintf(f, "dynamic_resolution=%d\nsettings_version=%d\ncompressed_textures=%d\nrender_backend=%d\nauto_perf=%d\n",
+          (int)g.dynamic_resolution, kSettingsVersion, g.compressed_textures, g.render_backend, (int)g.auto_perf);
   fprintf(f, "clip_ui_43=%d\ncutscene_bars=%d\nskip_any_cutscene=%d\nhud_169=%d\nwarp_enemy_counts=%d\n", (int)g.clip_ui_43, (int)g.cutscene_bars,
           (int)g.skip_any_cutscene, (int)g.hud_169, (int)g.warp_enemy_counts);
   fprintf(f, "fov_percent=%d\ncam_sens=%d\ninvert_cam_x=%d\ninvert_cam_y=%d\n", g.fov_percent, g.cam_sens, (int)g.invert_cam_x,
@@ -576,6 +588,11 @@ void draw() {
     ImGui::Text("textures %s   %llu compressed, %d%% less", em == 0 ? "32-bit" : em == 1 ? "ETC2" : "ETC2 (all)",
                 (unsigned long long)gxlle::etc2_textures(), gxlle::etc2_saved_percent());
     ImGui::Text("%s", game::cutscene_active() ? "cutscene" : game::in_stage() ? "stage" : "menus");
+    if (perf_auto::enabled()) {
+      // what the governor took away to hold this frame rate: the first thing a "still slow" report has to say
+      const int lv = perf_auto::level();
+      ImGui::Text("auto quality: %s", lv == 0 ? "full" : lv == 1 ? "glow off" : "glow off, 40% floor");
+    }
     ImGui::Text("%s - %s", gxlle::gpu_backend_name(), gxlle::gpu_adapter_name());
     {
       double d3 = 0, d2 = 0;
@@ -668,6 +685,7 @@ void draw() {
 void apply_display() {
   gxlle::g_render_height = g.height;
   drs::reset();   // the player's height is the new starting point for the adaptive scale
+  perf_auto::reset();
   bool aspect_changed = gxlle::g_widescreen != g.widescreen;
   gxlle::g_widescreen = g.widescreen;
   gxlle::apply_display_settings();
