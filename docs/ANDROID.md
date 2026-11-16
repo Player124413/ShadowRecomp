@@ -321,6 +321,13 @@ leave the field empty.
 > The artifacts of a public repository can be downloaded by anyone who is signed in to
 > GitHub.
 
+The log of the **Configure Project** step has thousands of lines like
+`Fallback function 0x11020: not found from known entry points` and
+`Unresolved Call at 0x1112D in function 0x11100`. That is XboxRecomp2 reporting how it
+found the game's functions, and which calls only get their target while the game runs.
+None of them is an error, and they say nothing about the disc image: a wrong one is
+turned down before, in **Find the Game**.
+
 If a run fails, the lines of the log that explain why are on the summary page of the
 run, and the complete logs are attached to it as an artifact.
 

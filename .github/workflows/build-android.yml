@@ -233,6 +233,13 @@ jobs:
           cmake . --preset "${CMAKE_PRESET}" -DCMAKE_CXX_COMPILER_LAUNCHER=ccache -DCMAKE_C_COMPILER_LAUNCHER=ccache "${recompiler}" 2>&1 | tee "${RUNNER_TEMP}/logs/configure.log"
           touch "${RUNNER_TEMP}/logs/configure.ok"
 
+          if [ "${GAME_SOURCE}" != "stub" ]; then
+            # XboxRecomp2 lists every function it had to search for and every call whose
+            # target is only known when the game runs: thousands of lines, none an error.
+            functions="$(sed -n 's/^Analysed \([0-9][0-9]*\) functions\.$/\1/p' "${RUNNER_TEMP}/logs/configure.log" | tail -n 1)"
+            echo "::notice title=XboxRecomp2::Recompiled ${functions:-the} functions of the game. The \"Fallback function\" and \"Unresolved Call\" lines in the log of this step are its report on how it found them, not errors."
+          fi
+
       # Builds libmain.so and copies it, with the Vulkan driver loader's hook libraries,
       # into android-apk/app/src/main/jniLibs.
       - name: Build Project

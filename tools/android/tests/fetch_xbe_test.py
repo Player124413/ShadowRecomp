@@ -63,13 +63,13 @@ WORK.mkdir()
 XBE = make_test_iso.placeholder_xbe()
 
 
-def run(*arguments, verify=False):
+def run(*arguments, verify=False, actions=False):
     """Runs the script; returns (exit code, output)."""
     command = [sys.executable, str(SCRIPT), *map(str, arguments), '--work-dir', str(WORK)]
     if not verify:
         command.append('--no-verify')
     result = subprocess.run(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, timeout=120,
-                            env={**os.environ, 'GITHUB_ACTIONS': 'false'})
+                            env={**os.environ, 'GITHUB_ACTIONS': 'true' if actions else 'false'})
     return result.returncode, result.stdout
 
 
@@ -316,6 +316,18 @@ check(code != 0 and not output.exists(), 'the placeholder is not a dump the inst
 
 code, text = run(ROOT / 'bare.iso', '--output', output)
 check(code == 0 and output.read_bytes() == XBE, '--no-verify accepts it')
+check('::' not in text, 'outside GitHub Actions there are no workflow commands in the output')
+
+# In a GitHub Actions job the outcome also goes to the summary page of the run.
+code, text = run(ROOT / 'bare.iso', '--output', output, '--hashes', accepted, verify=True, actions=True)
+check(code == 0 and '::notice title=Game files::default.xbe: 4.0 KiB, "ShadowRecomp pipeline test" (title ID FFFF0000). '
+      'It is a known dump of the game' in text, 'a notice says that the disc image is the right one')
+code, text = run(ROOT / 'bare.iso', '--output', output, actions=True)
+check(code == 0 and '::notice title=Game files::' in text and 'Not checked against the known dumps' in text,
+      'or that it was not checked')
+code, text = run(ROOT / 'bare.iso', '--output', output, '--hashes', table, verify=True, actions=True)
+check(code != 0 and '::error title=Game files::This default.xbe is not one of the 3 dumps' in text,
+      'and an error annotation says why a disc image was refused')
 
 # ---------------------------------------------------------------------------------------
 scenario('share links')

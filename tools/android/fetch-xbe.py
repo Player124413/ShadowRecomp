@@ -64,6 +64,13 @@ def say(message):
     print(message, flush=True)
 
 
+def annotate(kind, message):
+    """Puts a message on the summary page of the run when this is a GitHub Actions job."""
+    if os.environ.get('GITHUB_ACTIONS') == 'true':
+        message = message.replace('%', '%25').replace('\r', '%0D').replace('\n', '%0A')
+        print(f'::{kind} title=Game files::{message}', flush=True)
+
+
 def megabytes(size):
     if size >= 1024 ** 3:
         return f'{size / 1024 ** 3:.2f} GiB'
@@ -619,11 +626,13 @@ def main():
         temporary.write_bytes(data)
         os.replace(temporary, output)
         say(f'Wrote {output}')
+
+        annotate('notice', f'{XBE_NAME}: {megabytes(len(data))}' + (f', {description}' if description else '') + '. '
+                 + ('Not checked against the known dumps of the game.' if arguments.no_verify
+                    else 'It is a known dump of the game: this is the right disc image.'))
     except Failure as failure:
-        message = str(failure)
-        if os.environ.get('GITHUB_ACTIONS') == 'true':
-            print(f'::error title=Game files::{message}', flush=True)
-        sys.exit(f'fetch-xbe: {message}')
+        annotate('error', str(failure))
+        sys.exit(f'fetch-xbe: {failure}')
     finally:
         shutil.rmtree(work, ignore_errors=True)
 
