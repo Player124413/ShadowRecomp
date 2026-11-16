@@ -274,9 +274,13 @@ jobs:
           # Android installs an update only over an app signed with the same key. The
           # fingerprint on the run page tells whether two builds are.
           apksigner="$(ls "${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}"/build-tools/*/apksigner 2>/dev/null | sort -V | tail -n 1 || true)"
-          certificate=""
+          signers=""
           if [ -n "${apksigner}" ]; then
-            certificate="$("${apksigner}" verify --print-certs "${apk}" 2>/dev/null | sed -n 's/^Signer #1 certificate SHA-256 digest: //p' | head -n 1 || true)"
+            signers="$("${apksigner}" verify --print-certs "${apk}" 2>&1 || true)"
+          fi
+          certificate="$(printf '%s\n' "${signers}" | sed -n 's/^.*certificate SHA-256 digest: //p' | head -n 1 || true)"
+          if [ -z "${certificate}" ]; then
+            echo "::warning title=Signing::The certificate of the APK could not be read with ${apksigner:-apksigner, which was not found}: $(printf '%s' "${signers}" | head -n 3 | tr '\n' ' ' | cut -c1-300)"
           fi
           if [ -n "${ANDROID_KEYSTORE_BASE64}" ]; then
             echo "::notice title=Signing::Signed with the key of the ANDROID_KEYSTORE secrets (certificate SHA-256 ${certificate:-unknown}). Installs over builds signed with the same key."
