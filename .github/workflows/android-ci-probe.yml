@@ -9,12 +9,19 @@ jobs:
   probe:
     runs-on: ubuntu-26.04
     steps:
-      - name: Environment
+      - name: Annotation limits
         run: |-
-          note() { echo "::notice title=$1::$(printf '%s' "$2" | tr '\n' '|' | cut -c1-900)"; }
-          note os "$(. /etc/os-release; echo "$PRETTY_NAME"; uname -r; nproc; free -g | sed -n 2p)"
-          note disk "$(df -h / /mnt 2>&1 | tail -n +2)"
-          note android "$(echo "ANDROID_HOME=$ANDROID_HOME ANDROID_NDK_HOME=$ANDROID_NDK_HOME"; ls "$ANDROID_HOME/ndk" 2>&1; ls "$ANDROID_HOME/platforms" 2>&1 | tr '\n' ' '; echo; ls "$ANDROID_HOME/build-tools" 2>&1 | tr '\n' ' '; echo; ls "$ANDROID_HOME/cmdline-tools" 2>&1 | tr '\n' ' ')"
-          note tools "$(cmake --version | head -1; ninja --version 2>&1 | head -1; python3 --version; java -version 2>&1 | head -1; echo "JAVA_HOME_17_X64=$JAVA_HOME_17_X64 JAVA_HOME_21_X64=$JAVA_HOME_21_X64"; cargo --version 2>&1 | head -1; gcc --version | head -1; clang --version 2>&1 | head -1)"
-          note archive "$(for t in 7z 7zz 7za unrar unzip xxhsum xxh64sum curl wget gh aria2c megatools megadl; do printf '%s=%s ' "$t" "$(command -v $t || echo -)"; done; python3 -c 'import xxhash' 2>&1 | tail -1; pip --version 2>&1 | cut -c1-60)"
-          note ccache "$(command -v ccache || echo no-ccache; gradle --version 2>&1 | grep -m1 Gradle)"
+          for size in 1000 4000 16000 64000; do
+            body="$(python3 -c "print('size=$size ' + 'x' * ($size - 20) + ' END$size')")"
+            echo "::notice title=size-$size::${body}"
+          done
+          multi="$(printf 'line one\nline two %%25 percent\nline three')"
+          multi="${multi//'%'/'%25'}"; multi="${multi//$'\n'/'%0A'}"
+          echo "::notice title=multiline::${multi}"
+          for i in $(seq 1 14); do echo "::error title=err-$i::error number $i"; done
+          for i in $(seq 1 14); do echo "::warning title=warn-$i::warning number $i"; done
+      - name: Second step
+        run: |-
+          for i in $(seq 1 12); do echo "::error title=second-$i::second step error $i"; done
+          python3 -c "import venv, sys; print(sys.version)"
+          echo "::notice title=misc::$(python3 -m venv /tmp/v && /tmp/v/bin/pip --version | cut -c1-40; id -un; sudo -n true && echo sudo-ok; echo "RUNNER_TEMP=$RUNNER_TEMP"; df -h /tmp | tail -1 | tr -s ' ' | cut -d' ' -f4; git --version)"
