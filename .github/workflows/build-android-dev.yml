@@ -1,0 +1,18 @@
+# Development aid for the Android port: builds on every push to the branch it is being
+# worked on. With the GAME_ISO_URL secret set that is a build of the game; without it, a
+# pipeline test (see docs/ANDROID.md). Delete this file when the branch is gone.
+name: build-android-dev
+on:
+  push:
+    branches: ['arena/54f59919-shadowrecomp']
+    paths-ignore:
+      - 'docs/**'
+      - '**/*.md'
+permissions:
+  contents: read
+jobs:
+  build:
+    uses: ./.github/workflows/build-android.yml
+    with:
+      stub_if_no_game: true
+    secrets: inherit

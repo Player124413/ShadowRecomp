@@ -333,6 +333,10 @@ functions. The result is a real APK, named `-stub`, whose launcher works and who
 says that it has no game code. This is for checking the workflow, the toolchain and the
 packaging after a change; it tells nothing about the recompiled game.
 
+`.github/workflows/build-android-dev.yml` does this on every push to the branch the port
+is being developed on, or a build of the game if the `GAME_ISO_URL` secret is set. It is
+a development aid and can be deleted together with that branch.
+
 The same build can be made locally:
 
 ```bash

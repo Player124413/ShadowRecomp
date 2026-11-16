@@ -16,6 +16,17 @@ on:
   # release.yml calls this. The game then comes from the GAME_ISO_URL secret, or from the
   # asset repository the other build workflows use.
   workflow_call:
+    inputs:
+      stub_build:
+        description: "Pipeline test: build without the game"
+        type: boolean
+        required: false
+        default: false
+      stub_if_no_game:
+        description: "Make it a pipeline test when no game is configured, instead of failing"
+        type: boolean
+        required: false
+        default: false
     secrets:
       GAME_ISO_URL:
         required: false
@@ -35,9 +46,6 @@ on:
         required: false
       ANDROID_KEY_PASSWORD:
         required: false
-  # TEMPORARY, while the workflow is being tested on this branch: every push is a pipeline test.
-  push:
-    branches: ['arena/54f59919-shadowrecomp']
 permissions:
   contents: read
 concurrency:
@@ -90,7 +98,8 @@ jobs:
       - name: Find the Game
         id: game
         env:
-          STUB_BUILD: ${{ inputs.stub_build || github.event_name == 'push' }}
+          STUB_BUILD: ${{ inputs.stub_build }}
+          STUB_IF_NO_GAME: ${{ inputs.stub_if_no_game }}
           GAME_ISO_URL: ${{ secrets.GAME_ISO_URL }}
           HAS_ASSET_REPO: ${{ secrets.ASSET_REPO != '' && secrets.ASSET_REPO_TOKEN != '' }}
         run: |-
@@ -111,11 +120,12 @@ jobs:
 
           if [ "${STUB_BUILD}" = "true" ]; then
             source="stub"
-            echo "::warning title=Pipeline test::This run builds without the game. Its APK is named -stub and cannot start the game."
           elif [ -n "${link}" ]; then
             source="link"
           elif [ "${HAS_ASSET_REPO}" = "true" ]; then
             source="asset-repo"
+          elif [ "${STUB_IF_NO_GAME}" = "true" ]; then
+            source="stub"
           else
             echo "::error title=No game::Start the workflow with a link to your disc image of Shadow the Hedgehog (Xbox) in the iso_url field, or save the link as the repository secret GAME_ISO_URL. See docs/ANDROID.md."
             exit 1
@@ -125,6 +135,7 @@ jobs:
           echo "GAME_SOURCE=${source}" >> "${GITHUB_ENV}"
           if [ "${source}" = "stub" ]; then
             echo "ARTIFACT_SUFFIX=-stub" >> "${GITHUB_ENV}"
+            echo "::warning title=Pipeline test::This run builds without the game. Its APK is named -stub and cannot start the game."
           fi
 
           case "${source}" in
@@ -146,8 +157,6 @@ jobs:
                 sleep 0.2
               done
               python3 ./tools/android/fetch-xbe.py "http://127.0.0.1:8731/game.7z" --no-verify
-              # TEMPORARY-REHEARSAL: let the real recompiler loose on the placeholder
-              echo "GAME_SOURCE=link" >> "${GITHUB_ENV}"
               ;;
           esac
 
