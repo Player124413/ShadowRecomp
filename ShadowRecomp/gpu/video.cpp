@@ -5930,14 +5930,30 @@ static void ProcClear(const RenderCommand& cmd)
 		(g_renderTarget->width == g_depthStencil->width && g_renderTarget->height == g_depthStencil->height);
 
 #ifdef __ANDROID__
-	// A depth buffer that covers the colour target can be cleared along with it: what is
-	// cleared of it is the area of the colour target, and no clear of the Xbox reached
-	// beyond the viewport either. This saves two changes of frame buffer per clear, each
-	// of which makes the tile-based GPU of a phone write its targets out and read them in.
-	if (g_renderTarget != nullptr && g_depthStencil != nullptr &&
-		g_depthStencil->width >= g_renderTarget->width && g_depthStencil->height >= g_renderTarget->height)
+	// The depth buffer of the game covers its colour targets without being of their size
+	// (CoverBackBuffer()). All of it is cleared, as below, in a frame buffer of its own.
+	// The colour target is then cleared in the frame buffer the two share, which is the one
+	// the draws that follow a clear mostly use: one change of frame buffer less than
+	// clearing each on its own, and every change makes the tile-based GPU of a phone
+	// write its targets out and read the next ones in.
+	if (!canClearInOnePass && g_depthStencil->width >= g_renderTarget->width && g_depthStencil->height >= g_renderTarget->height)
 	{
-		canClearInOnePass = true;
+		auto& clearCommandList = g_commandLists[g_frame];
+
+		// Stencil clears are ignored: our D32_FLOAT textures only store depth.
+		if ((args.flags & X_D3DCLEAR_ZBUFFER) != 0)
+		{
+			SetFramebuffer(nullptr, g_depthStencil, true);
+			clearCommandList->clearDepthStencil(true, false, args.z, args.stencil);
+		}
+
+		if ((args.flags & X_D3DCLEAR_TARGET) != 0)
+		{
+			SetFramebuffer(g_renderTarget, g_depthStencil, true);
+			clearCommandList->clearColor(0, RenderColor(args.color[0], args.color[1], args.color[2], args.color[3]));
+		}
+
+		return;
 	}
 #endif
 
