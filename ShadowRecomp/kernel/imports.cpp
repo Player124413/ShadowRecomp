@@ -272,6 +272,19 @@ uint32_t DbgPrint(PCHAR Format, ...) {
 	return result;
 }
 
+// The AArch64 procedure call standard makes va_list a structure. Unlike the pointer it is
+// on other hosts, the argument translator cannot make one out of a guest stack slot, so
+// the guest's DbgPrint prints its format string as it is there.
+#if defined(__aarch64__) && !defined(_WIN32) && !defined(__APPLE__)
+#define SHADOW_RECOMP_VA_LIST_IS_STRUCT
+
+uint32_t DbgPrintFormat(PCHAR Format) {
+	if (Format != nullptr)
+		fputs(Format, stdout);
+	return X_STATUS_SUCCESS;
+}
+#endif
+
 void ExFreePool(void* ptr)
 {
 	g_userHeap.Free(g_memory.Translate((uint32_t)(uintptr_t)ptr));
@@ -1445,7 +1458,11 @@ GUEST_FUNCTION_HOOK_STDCALL(__imp__AvGetSavedDataAddress, AvGetSavedDataAddress)
 GUEST_FUNCTION_HOOK_STDCALL(__imp__AvSetSavedDataAddress, AvSetSavedDataAddress);
 GUEST_FUNCTION_HOOK_STDCALL(__imp__AvSetDisplayMode, AvSetDisplayMode);
 GUEST_FUNCTION_HOOK_STDCALL(__imp__AvSendTVEncoderOption, AvSendTVEncoderOption);
+#ifdef SHADOW_RECOMP_VA_LIST_IS_STRUCT
+GUEST_FUNCTION_HOOK(__imp__DbgPrint, DbgPrintFormat);
+#else
 GUEST_FUNCTION_HOOK(__imp__DbgPrint, DbgPrintV);
+#endif
 
 GUEST_FUNCTION_HOOK(sub_2ADB04, XGetLanguage);
 

@@ -261,6 +261,15 @@ X86_OVERRIDE_FUNC(sub_3DC590)
 
 const uint8_t* CreateRecompiledPixelShader(X_D3DPIXELSHADERDEF* PSDef, void* psGuestInf, size_t* outSize)
 {
+#ifdef SHADOW_RECOMP_NO_RUNTIME_SHADER_COMPILER
+	// See CreateRecompiledShader in vertexshader.cpp.
+	(void)PSDef;
+	(void)psGuestInf;
+	if (outSize != nullptr)
+		*outSize = 0;
+
+	return nullptr;
+#else
 	pixelShader_GuestInfo* psGuestInfo = static_cast<pixelShader_GuestInfo*>(psGuestInf);
 	const bool isvulkan = Video::is_vulkan();
 	bool exportHLSLFile = false;
@@ -271,5 +280,6 @@ const uint8_t* CreateRecompiledPixelShader(X_D3DPIXELSHADERDEF* PSDef, void* psG
 
 	auto pShaderOut = XSR_CreateRecompiledPixelShader(PSDef, outSize, psGuestInfo, isvulkan, exportHLSLFile);
 	return pShaderOut;
+#endif
 
 }

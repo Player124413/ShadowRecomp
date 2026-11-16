@@ -33,6 +33,21 @@
 #include <patches/bloom_patches.h>
 #include <misc/rich_presence/shadow_rpc.h>
 
+#ifdef __ANDROID__
+// Renames main() to SDL_main(), the entry point SDLActivity calls on its own thread.
+#include <SDL3/SDL_main.h>
+
+#ifndef main
+#error "main() must be renamed to SDL_main() on Android: do not define SDL_MAIN_HANDLED."
+#endif
+
+#include <os/android/install_android.h>
+#include <os/android/jni_android.h>
+#include <os/android/storage_android.h>
+#include <os/android/vulkan_driver_android.h>
+#include <ui/touch_controls.h>
+#endif
+
 
 #if defined(_WIN32) && defined(SHADOW_RECOMP_D3D12)
 static std::array<std::string_view, 3> g_D3D12RequiredModules =
@@ -181,6 +196,27 @@ int main(int argc, char* argv[])
 
     os::logger::Init();
 
+#ifdef __ANDROID__
+    // Everything is read from and written to the storage root chosen in the launcher.
+    if (!os::android::HasDataRoot())
+    {
+        const auto message = os::android::LocaliseMessage("storage_native_unavailable",
+            "The selected game storage is unavailable or not writable. Reconnect the SD card or choose another storage location in the launcher.");
+        SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "Shadow Recompiled", message.c_str(), nullptr);
+        std::_Exit(1);
+    }
+
+    {
+        // The user path is nested two levels below the storage root, and Config::Save()
+        // only creates its last component (and throws if the parent is missing). The
+        // launcher normally creates it, but GameActivity can also be started directly.
+        std::error_code userPathEc;
+        std::filesystem::create_directories(GetUserPath(), userPathEc);
+        if (userPathEc)
+            LOGFN_ERROR("Could not create {}: {}", GetUserPath().string(), userPathEc.message());
+    }
+#endif
+
     PreloadContext preloadContext;
     preloadContext.PreloadExecutable();
 
@@ -260,6 +296,29 @@ int main(int argc, char* argv[])
 
     Config::Load();
 
+#ifdef __ANDROID__
+    // The game always covers the screen; a config.toml copied from a PC must not make
+    // the window code try to leave fullscreen.
+    Config::Fullscreen = true;
+
+    AndroidSetVulkanDriverSelection(Config::VulkanDriver, Config::RenderMode);
+
+    {
+        // The launcher asks for the touch layout editor with a marker file; consume it.
+        std::error_code markerEc;
+        const std::filesystem::path editMarker = GetGamePath() / "touch_layout_edit.txt";
+        const bool editTouchLayout = std::filesystem::exists(editMarker, markerEc);
+        if (editTouchLayout)
+            std::filesystem::remove(editMarker, markerEc);
+
+        TouchControls::Configure(Config::TouchControls, Config::TouchCamera, GetUserPath() / "touch_layout.cfg", editTouchLayout);
+    }
+
+    // The launcher stages the game source (disc image or extracted disc); install it
+    // before anything looks for the game. See os/android/install_android.h.
+    const os::android::StagedInstallResult stagedInstall = os::android::InstallStagedGame(GetGamePath(), MainGameFolder);
+#endif
+
     bool isGameInstalled = std::filesystem::exists(GameExecutable);
     bool runInstallerWizard = forceInstaller || !isGameInstalled;
 
@@ -287,6 +346,15 @@ int main(int argc, char* argv[])
 
     if (runInstallerWizard)
     {
+#ifdef __ANDROID__
+        // There is no installer wizard on Android. A failed staged install has already
+        // told the user what went wrong; otherwise point them at the launcher.
+        if (stagedInstall != os::android::StagedInstallResult::Failed)
+            os::android::ShowGameMissingMessage();
+
+        std::_Exit(1);
+#endif
+
         if (!Video::CreateHostDevice(sdlVideoDriver, graphicsApiRetry))
         {
             SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, GameWindow::GetTitle(), Localise("Video_BackendError").c_str(), GameWindow::s_pWindow);
@@ -349,7 +417,14 @@ int main(int argc, char* argv[])
     {
         if (!Video::CreateHostDevice(sdlVideoDriver, graphicsApiRetry))
         {
+#ifdef __ANDROID__
+            // The usual cause on Android is the selected driver, which is changed in the launcher.
+            const auto message = os::android::LocaliseMessage("vulkan_startup_failed",
+                "The graphics driver could not be started. Select another Vulkan driver in the launcher (try System or Auto) and start the game again.");
+            SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, GameWindow::GetTitle(), message.c_str(), GameWindow::s_pWindow);
+#else
             SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, GameWindow::GetTitle(), Localise("Video_BackendError").c_str(), GameWindow::s_pWindow);
+#endif
             std::_Exit(1);
         }
     }

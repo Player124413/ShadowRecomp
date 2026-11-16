@@ -40,6 +40,44 @@ Memory::Memory()
 
 	DWORD oldProtect;
 	VirtualProtect(base, 4096, PAGE_NOACCESS, &oldProtect);
+#elif defined(__ANDROID__)
+	// Host pointers are turned back into guest addresses by truncating them to 32 bits in
+	// a few places, which is only correct when the base is a multiple of 4 GiB. mmap()
+	// treats the address as a hint, and an app process (the Java runtime is loaded first)
+	// has far more mappings that can be in the way than a desktop one, so take the first
+	// candidate that is granted exactly instead of accepting whatever address comes back.
+	// MAP_NORESERVE: the 4 GiB are address space, not memory the game will ever fill.
+	static constexpr uintptr_t kCandidateBases[] =
+	{
+		0x100000000ull,
+		0x200000000ull,
+		0x300000000ull,
+		0x400000000ull,
+		0x500000000ull,
+		0x600000000ull,
+		0x700000000ull,
+		0x800000000ull,
+	};
+
+	for (uintptr_t candidate : kCandidateBases)
+	{
+		void* mapping = mmap((void*)candidate, X86_MEMORY_SIZE, PROT_READ | PROT_WRITE, MAP_ANON | MAP_PRIVATE | MAP_NORESERVE, -1, 0);
+
+		if (mapping == (void*)candidate)
+		{
+			base = (uint8_t*)mapping;
+			break;
+		}
+
+		if (mapping != MAP_FAILED)
+			munmap(mapping, X86_MEMORY_SIZE);
+	}
+
+	// HostStartup() reports the failure once a message box can be shown.
+	if (base == nullptr)
+		return;
+
+	mprotect(base, 4096, PROT_NONE);
 #else
 	base = (uint8_t*)mmap((void*)0x100000000ull, X86_MEMORY_SIZE, PROT_READ | PROT_WRITE, MAP_ANON | MAP_PRIVATE, -1, 0);
 

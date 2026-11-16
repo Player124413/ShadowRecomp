@@ -19,6 +19,10 @@
 // Miscellaneous memory variables
 // Xbox pages are (1 << 12) = 0x00001000 = 4096 bytes in size. Large pages are 4 MiB instead
 // NOTE: PAGE_SIZE is also defined in xfile.h (oxdk) and linux_wrapper.h (oxdk)
+// The host's C library may define these for its own pages (bionic's <sys/user.h> does).
+#undef PAGE_SHIFT
+#undef PAGE_SIZE
+#undef PAGE_MASK
 #define PAGE_SHIFT                          12 // 2^12 = 4 KiB
 #define PAGE_SIZE                           (1 << PAGE_SHIFT) 
 #define PAGE_MASK                           (PAGE_SIZE - 1)

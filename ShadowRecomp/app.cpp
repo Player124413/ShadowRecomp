@@ -15,6 +15,13 @@
 #include <patches/multiplayer_mod_patches.h>
 #include <misc/rich_presence/shadow_rpc.h>
 
+#ifdef __ANDROID__
+#include <os/android/lifecycle_android.h>
+#include <ui/touch_controls.h>
+#endif
+
+// NOTE: on Android this is the thread that loaded the library, not the one running main();
+// UpdateSDLEventsMidAsmHook() corrects it.
 static std::thread::id g_mainThreadId = std::this_thread::get_id();
 
 void App::Restart(std::vector<std::string> restartArgs)
@@ -52,6 +59,16 @@ bool Window_OnSDLEvent(void*, SDL_Event* event);
 X86_FUNC_IMPL(__imp__sub_57630);
 X86_OVERRIDE_FUNC(sub_57630)
 {
+#ifdef __ANDROID__
+	// Park the game while the app is in the background: its window surface is gone and
+	// SDL has paused audio. See os/android/lifecycle_android.h.
+	os::android::WaitWhileAppPaused();
+
+	// Leaving a layout editor session started from the launcher returns to the launcher.
+	if (TouchControls::ConsumeExitRequest())
+		App::Exit();
+#endif
+
 	double targetFps = GetTargetFPS();
 	if (targetFps >= FPS_MIN && targetFps < GetUnlockedFPS())
 	{
@@ -103,6 +120,12 @@ std::atomic<bool> shouldQuit = false;
 // So we do a mid asm hook in the entry point function and put our loop there instead
 void UpdateSDLEventsMidAsmHook(X86Context& __restrict ctx, uint8_t* base)
 {
+#ifdef __ANDROID__
+	// Static initializers run on the Java thread that loaded the library, while main() and
+	// this hook run on SDL's own thread, which is the one that has to pump events.
+	g_mainThreadId = std::this_thread::get_id();
+#endif
+
 	SDL_Event event;
 	while (!shouldQuit)
 	{

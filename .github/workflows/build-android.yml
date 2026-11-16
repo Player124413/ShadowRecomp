@@ -1,0 +1,147 @@
+name: build-android
+on:
+  # Not part of validate.yml yet: run it from the Actions tab, or let release.yml call it.
+  workflow_dispatch:
+  workflow_call:
+    secrets:
+      ASSET_REPO:
+        required: true
+      ASSET_REPO_TOKEN:
+        required: true
+      XBOXRECOMP2_TOKEN:
+        required: true
+      # Optional release signing, see docs/ANDROID.md. Without these the APK is signed
+      # with the runner's throwaway debug key: it installs, but cannot be updated in place.
+      ANDROID_KEYSTORE_BASE64:
+        required: false
+      ANDROID_KEYSTORE_PASSWORD:
+        required: false
+      ANDROID_KEY_ALIAS:
+        required: false
+      ANDROID_KEY_PASSWORD:
+        required: false
+permissions:
+  contents: read
+
+jobs:
+  build-android:
+    name: Build Android (${{ matrix.arch.name }}, ${{ matrix.preset }})
+    runs-on: ${{ matrix.arch.runner }}
+    strategy:
+      matrix:
+        arch: [
+          {"name": "arm64-v8a", "runner": "ubuntu-26.04"},
+        ]
+        preset: [
+          "android-release",
+          #"android-relwithdebinfo"
+        ]
+    env:
+      # Keep in sync with ndkVersion in android-apk/app/build.gradle.
+      NDK_VERSION: 29.0.14206865
+      CMAKE_PRESET: ${{ matrix.preset }}
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event_name == 'pull_request_target' && github.event.pull_request.head.sha || '' }}
+          allow-unsafe-pr-checkout: true
+          token: ${{ secrets.ASSET_REPO_TOKEN }}
+
+      # HACK: Fine-grained token can't access cross-org repos.
+      # REMOVE when XboxRecomp2 & assets repo go public.
+      # vcpkg is skipped as well: the Android build doesn't use it.
+      - name: Checkout Submodules
+        env:
+          TOKEN: ${{ secrets.ASSET_REPO_TOKEN }}
+        run: >-
+          git -c "url.https://x-access-token:${TOKEN}@github.com/.insteadOf=https://github.com/"
+          -c submodule.tools/XboxRecomp2.update=none
+          -c submodule.thirdparty/vcpkg.update=none
+          submodule update --init --recursive
+
+      - name: Checkout Private Repository
+        uses: actions/checkout@v7
+        with:
+          repository: ${{ secrets.ASSET_REPO }}
+          token: ${{ secrets.ASSET_REPO_TOKEN }}
+          path: ./private
+
+      - name: Install Dependencies
+        run: |-
+          sudo apt update
+          sudo apt install -y ninja-build
+
+      # The Android Gradle Plugin needs JDK 17; the runner defaults to a newer one.
+      - name: Setup Java
+        uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: 17
+
+      # Tests of the Android-only code that run on the build machine (docs/ANDROID.md).
+      # A failure is reported on the run but does not stop the APK from being built.
+      - name: Run Tests
+        continue-on-error: true
+        run: |-
+          cmake -S ./tools/android/tests -B ./out/build/android-tests -G Ninja
+          cmake --build ./out/build/android-tests
+          ctest --test-dir ./out/build/android-tests --output-on-failure
+
+      # The runner's ANDROID_NDK_HOME points at its default NDK, not the one this project pins.
+      - name: Setup Android NDK
+        run: |-
+          if [ ! -d "${ANDROID_HOME}/ndk/${NDK_VERSION}" ]; then
+            "${ANDROID_HOME}/cmdline-tools/latest/bin/sdkmanager" --install "ndk;${NDK_VERSION}"
+          fi
+          echo "ANDROID_NDK_HOME=${ANDROID_HOME}/ndk/${NDK_VERSION}" >> $GITHUB_ENV
+
+      - name: Setup ccache
+        uses: hendrikmuhs/ccache-action@v1.2
+        with:
+          key: ${{ runner.os }}-android-${{ matrix.arch.name }}-${{ matrix.preset }}
+
+      - name: Prepare Project
+        run: cp ./private/* ./ShadowRecompLib/private
+
+      # HACK: GH_TOKEN for private XboxRecomp2. REMOVE when public.
+      - name: Configure Project
+        env:
+          GH_TOKEN: ${{ secrets.XBOXRECOMP2_TOKEN }}
+        run: cmake . --preset ${{ env.CMAKE_PRESET }} -DCMAKE_CXX_COMPILER_LAUNCHER=ccache -DCMAKE_C_COMPILER_LAUNCHER=ccache -DSHADOW_RECOMP_XBOXRECOMP2=binary
+
+      # Builds libmain.so and copies it, with the Vulkan driver loader's hook libraries,
+      # into android-apk/app/src/main/jniLibs.
+      - name: Build Project
+        run: cmake --build ./out/build/${{ env.CMAKE_PRESET }} --target android-jnilibs
+
+      - name: Fetch Vulkan Drivers
+        run: ./tools/android/fetch-drivers.sh
+
+      - name: Build APK
+        working-directory: ./android-apk
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |-
+          if [ -n "${ANDROID_KEYSTORE_BASE64}" ]; then
+            printf '%s' "${ANDROID_KEYSTORE_BASE64}" | base64 -d > "${RUNNER_TEMP}/release.keystore"
+            export ANDROID_KEYSTORE_FILE="${RUNNER_TEMP}/release.keystore"
+            ./gradlew --no-daemon assembleRelease
+            apk=./app/build/outputs/apk/release/app-release.apk
+          else
+            echo "::warning::No signing keystore is configured: building a debug-signed APK, which cannot be updated in place."
+            ./gradlew --no-daemon assembleDebug
+            apk=./app/build/outputs/apk/debug/app-debug.apk
+          fi
+          cp "${apk}" ../ShadowRecomp-Android-${{ matrix.arch.name }}-${{ env.CMAKE_PRESET }}.apk
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: ShadowRecomp-Android-${{ matrix.arch.name }}-${{ env.CMAKE_PRESET }}
+          path: ./ShadowRecomp-Android-${{ matrix.arch.name }}-${{ env.CMAKE_PRESET }}.apk
+          retention-days: 3

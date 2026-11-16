@@ -27,8 +27,16 @@ function(BIN2C)
         set(BIN2C_ARGS_COMPRESSION_TYPE "none")
     endif()
 
+    # A cross build (Android) cannot run the in-tree file_to_c target; the top-level
+    # CMakeLists.txt provides one built for the build machine instead.
+    if(SHADOW_RECOMP_FILE_TO_C_EXECUTABLE)
+        set(BIN2C_COMMAND "${SHADOW_RECOMP_FILE_TO_C_EXECUTABLE}")
+    else()
+        set(BIN2C_COMMAND $<TARGET_FILE:file_to_c>)
+    endif()
+
     add_custom_command(OUTPUT "${BIN2C_ARGS_DEST_FILE}.c"
-        COMMAND $<TARGET_FILE:file_to_c> "${BIN2C_ARGS_SOURCE_FILE}" "${BIN2C_ARGS_ARRAY_NAME}" "${BIN2C_ARGS_COMPRESSION_TYPE}" "${BIN2C_ARGS_DEST_FILE}.c" "${BIN2C_ARGS_DEST_FILE}.h"
+        COMMAND ${BIN2C_COMMAND} "${BIN2C_ARGS_SOURCE_FILE}" "${BIN2C_ARGS_ARRAY_NAME}" "${BIN2C_ARGS_COMPRESSION_TYPE}" "${BIN2C_ARGS_DEST_FILE}.c" "${BIN2C_ARGS_DEST_FILE}.h"
         DEPENDS "${BIN2C_ARGS_SOURCE_FILE}"
         BYPRODUCTS "${BIN2C_ARGS_DEST_FILE}.h"
         COMMENT "Generating binary header for ${BIN2C_ARGS_SOURCE_FILE}..."
@@ -68,9 +76,14 @@ else()
 endif()
 
 add_compile_definitions(
-    SDL_MAIN_HANDLED
     _DISABLE_CONSTEXPR_MUTEX_CONSTRUCTOR 
     _CRT_SECURE_NO_WARNINGS)
+
+# On Android the entry point is SDL_main(), which SDL's Java activity looks up and calls
+# on its own thread, so SDL_main.h must be left free to rename main() (see main.cpp).
+if (NOT ANDROID)
+    add_compile_definitions(SDL_MAIN_HANDLED)
+endif()
 
 set(SHADOW_RECOMP_PRECOMPILED_HEADERS
     "stdafx.h"
@@ -99,6 +112,19 @@ if (WIN32)
         "os/win32/user_win32.cpp"
         "os/win32/version_win32.cpp"
 
+    )
+elseif (ANDROID)
+    set(SHADOW_RECOMP_OS_CXX_SOURCES
+        "os/android/install_android.cpp"
+        "os/android/jni_android.cpp"
+        "os/android/lifecycle_android.cpp"
+        "os/android/logger_android.cpp"
+        "os/android/media_android.cpp"
+        "os/android/process_android.cpp"
+        "os/android/storage_android.cpp"
+        "os/android/stubs_android.cpp"
+        "os/android/user_android.cpp"
+        "os/android/vulkan_driver_android.cpp"
     )
 elseif (CMAKE_SYSTEM_NAME MATCHES "Linux")
     set(SHADOW_RECOMP_OS_CXX_SOURCES
@@ -136,6 +162,10 @@ set(SHADOW_RECOMP_GPU_CXX_SOURCES
     "gpu/imgui/imgui_font_builder.cpp"
     "gpu/imgui/imgui_snapshot.cpp"
 )
+
+if (ANDROID)
+    list(APPEND SHADOW_RECOMP_GPU_CXX_SOURCES "gpu/android_video.cpp")
+endif()
 
 
 set(SHADOW_RECOMP_APU_CXX_SOURCES
@@ -220,6 +250,18 @@ set(SHADOW_RECOMP_MISC_CXX_SOURCES
     "misc/rich_presence/shadow/utilities/stage_name_dictionary.cpp"
 )
 
+if (ANDROID)
+    # The launcher app (android-apk/) installs the game and updates itself, and Android
+    # has no Discord client to talk to. os/android/stubs_android.cpp keeps the interfaces
+    # of these three desktop features so the code calling them stays the same.
+    list(REMOVE_ITEM SHADOW_RECOMP_INSTALL_CXX_SOURCES "install/update_checker.cpp")
+    list(REMOVE_ITEM SHADOW_RECOMP_UI_CXX_SOURCES "ui/installer_wizard.cpp")
+    set(SHADOW_RECOMP_MISC_CXX_SOURCES "")
+
+    # The on-screen gamepad.
+    list(APPEND SHADOW_RECOMP_UI_CXX_SOURCES "ui/touch_controls.cpp")
+endif()
+
 
 set(SHADOW_RECOMP_THIRDPARTY_SOURCES
     "${SHADOW_RECOMP_THIRDPARTY_ROOT}/imgui/backends/imgui_impl_sdl3.cpp"
@@ -235,6 +277,11 @@ set(SHADOW_RECOMP_THIRDPARTY_SOURCES
     "${SHADOW_RECOMP_TOOLS_ROOT}/XShaderRecomp/thirdparty/smol-v/source/smolv.cpp"
 )
 
+if (ANDROID)
+    # Reads the driver packages (.zip) imported through the launcher.
+    list(APPEND SHADOW_RECOMP_THIRDPARTY_SOURCES "${SHADOW_RECOMP_THIRDPARTY_ROOT}/miniz/miniz.c")
+endif()
+
 
 set(SHADOW_RECOMP_THIRDPARTY_INCLUDES
     "${SHADOW_RECOMP_THIRDPARTY_ROOT}/concurrentqueue"
@@ -247,6 +294,10 @@ set(SHADOW_RECOMP_THIRDPARTY_INCLUDES
     "${SHADOW_RECOMP_TOOLS_ROOT}/bc_diff"
     "${SHADOW_RECOMP_TOOLS_ROOT}/XShaderRecomp/thirdparty/smol-v/source"
 )
+
+if (ANDROID)
+    list(APPEND SHADOW_RECOMP_THIRDPARTY_INCLUDES "${SHADOW_RECOMP_THIRDPARTY_ROOT}/miniz")
+endif()
 
 set_source_files_properties(${SHADOW_RECOMP_THIRDPARTY_SOURCES} PROPERTIES SKIP_PRECOMPILE_HEADERS ON)
 
@@ -335,6 +386,18 @@ if (WIN32)
             "/lldltocachepolicy:cache_size_bytes=4g:prune_after=72h"
         )
     endif()
+elseif (ANDROID)
+    # An Android app cannot start a bare executable. The game is a shared library that
+    # SDL's Java activity loads (GameActivity.getLibraries() names it "main") and whose
+    # SDL_main() it then calls.
+    add_library(ShadowRecomp SHARED ${SHADOW_RECOMP_CXX_SOURCES})
+    set_target_properties(ShadowRecomp PROPERTIES OUTPUT_NAME "main")
+
+    # Bind calls between the game's own functions at link time. A shared library otherwise
+    # routes every call to a function in another translation unit through the PLT so that
+    # it could be overridden from outside, which nothing does and the recompiled code,
+    # made of tens of thousands of functions calling each other, would pay for.
+    target_link_options(ShadowRecomp PRIVATE "LINKER:-Bsymbolic-functions")
 else()
     add_executable(ShadowRecomp ${SHADOW_RECOMP_CXX_SOURCES})
 endif()
@@ -356,8 +419,10 @@ if (SHADOW_RECOMP_D3D12)
 endif()
 
 #find_package(directx-dxc REQUIRED)
-find_package(CURL REQUIRED)
-find_package(nfd REQUIRED)
+if (NOT ANDROID)
+    find_package(CURL REQUIRED)
+    find_package(nfd REQUIRED)
+endif()
 
 include(FetchContent)
 
@@ -405,8 +470,12 @@ if (WIN32)
     )
 endif()
 
+# Discord Rich Presence is desktop only (stubbed on Android).
+if (NOT ANDROID)
+    target_link_libraries(ShadowRecomp PRIVATE discord-rpc)
+endif()
+
 target_link_libraries(ShadowRecomp PRIVATE
-    discord-rpc
     fmt::fmt
     libzstd_static
     msdf-atlas-gen::msdf-atlas-gen
@@ -420,9 +489,27 @@ target_link_libraries(ShadowRecomp PRIVATE
     plume
     XShaderRecompLib
     nlohmann_json::nlohmann_json
-    nfd::nfd
-    CURL::libcurl
 )
+
+if (ANDROID)
+    target_link_libraries(ShadowRecomp PRIVATE
+        adrenotools           # loads the bundled or an imported Vulkan driver
+        Freetype::Freetype    # built from source, see thirdparty/CMakeLists.txt
+        ShadowRecompDxcStub   # stands in for libdxcompiler, see tools/android/android.cmake
+        android
+        log
+    )
+
+    # No DirectX Shader Compiler exists for Android. Shaders come from the precompiled
+    # shader cache and the fixed-function variants built below; see gpu/vertexshader.cpp.
+    target_compile_definitions(ShadowRecomp PRIVATE SHADOW_RECOMP_NO_RUNTIME_SHADER_COMPILER)
+else()
+    # The installer wizard's file dialogs and the update checker's HTTP client.
+    target_link_libraries(ShadowRecomp PRIVATE
+        nfd::nfd
+        CURL::libcurl
+    )
+endif()
 
 
 target_compile_definitions(XShaderRecompLib PRIVATE SHADOW_RECOMP $<$<CONFIG:Release>:XSHADER_RECOMP_NOLOGGING>)
@@ -603,3 +690,46 @@ BIN2C(TARGET_OBJ ShadowRecomp SOURCE_FILE "${RESOURCES_SOURCE_PATH}/images/achie
 BIN2C(TARGET_OBJ ShadowRecomp SOURCE_FILE "${RESOURCES_SOURCE_PATH}/images/achievements/overlay.png" DEST_FILE "${RESOURCES_OUTPUT_PATH}/images/achievements/overlay.png" ARRAY_NAME "g_overlayAchievements" COMPRESSION_TYPE "zstd")
 BIN2C(TARGET_OBJ ShadowRecomp SOURCE_FILE "${RESOURCES_SOURCE_PATH}/images/achievements/shthR.png" DEST_FILE "${RESOURCES_OUTPUT_PATH}/images/achievements/shthR.png" ARRAY_NAME "g_shthR" COMPRESSION_TYPE "zstd")
 BIN2C(TARGET_OBJ ShadowRecomp SOURCE_FILE "${RESOURCES_SOURCE_PATH}/images/achievements/Expert.png" DEST_FILE "${RESOURCES_OUTPUT_PATH}/images/achievements/expert.png" ARRAY_NAME "g_expert" COMPRESSION_TYPE "zstd")
+
+if (ANDROID)
+    # Copies what the APK needs out of this build and into the Gradle project:
+    #
+    #   cmake --build <build dir> --target android-jnilibs
+    #
+    # libmain.so is the game. The four hook libraries belong to libadrenotools and must sit
+    # next to it as real files for a custom Vulkan driver to load (see android-apk/app/build.gradle).
+    set(SHADOW_RECOMP_ANDROID_JNILIBS_DIR "${CMAKE_SOURCE_DIR}/android-apk/app/src/main/jniLibs/${CMAKE_ANDROID_ARCH_ABI}"
+        CACHE PATH "Directory the android-jnilibs target copies the native libraries to")
+
+    set(SHADOW_RECOMP_ANDROID_LIBRARIES ShadowRecomp main_hook file_redirect_hook gsl_alloc_hook hook_impl)
+
+    set(SHADOW_RECOMP_ANDROID_LIBRARY_FILES "")
+    set(SHADOW_RECOMP_ANDROID_LIBRARY_COPIES "")
+    foreach(library IN LISTS SHADOW_RECOMP_ANDROID_LIBRARIES)
+        list(APPEND SHADOW_RECOMP_ANDROID_LIBRARY_FILES $<TARGET_FILE:${library}>)
+        list(APPEND SHADOW_RECOMP_ANDROID_LIBRARY_COPIES "${SHADOW_RECOMP_ANDROID_JNILIBS_DIR}/$<TARGET_FILE_NAME:${library}>")
+    endforeach()
+
+    # The NDK compiles everything with debug information, which makes libmain.so several
+    # times larger than the code in it. Gradle removes it while packaging, but only if it
+    # finds the NDK version named in app/build.gradle inside the SDK, so the copies are
+    # stripped here and the APK is the same size either way. The libraries in the build
+    # tree are left as they are: a crash address is looked up in those (docs/ANDROID.md).
+    set(SHADOW_RECOMP_ANDROID_STRIP_COMMAND "")
+    if (CMAKE_STRIP)
+        set(SHADOW_RECOMP_ANDROID_STRIP_COMMAND
+            COMMAND "${CMAKE_STRIP}" --strip-unneeded ${SHADOW_RECOMP_ANDROID_LIBRARY_COPIES})
+    else()
+        message(STATUS "CMAKE_STRIP is not set: android-jnilibs copies the native libraries with their debug information.")
+    endif()
+
+    add_custom_target(android-jnilibs
+        COMMAND ${CMAKE_COMMAND} -E make_directory "${SHADOW_RECOMP_ANDROID_JNILIBS_DIR}"
+        COMMAND ${CMAKE_COMMAND} -E copy ${SHADOW_RECOMP_ANDROID_LIBRARY_FILES} "${SHADOW_RECOMP_ANDROID_JNILIBS_DIR}"
+        ${SHADOW_RECOMP_ANDROID_STRIP_COMMAND}
+        COMMENT "Copying the native libraries to ${SHADOW_RECOMP_ANDROID_JNILIBS_DIR}"
+        VERBATIM
+    )
+
+    add_dependencies(android-jnilibs ${SHADOW_RECOMP_ANDROID_LIBRARIES})
+endif()

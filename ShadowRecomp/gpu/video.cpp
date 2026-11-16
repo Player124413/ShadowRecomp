@@ -27,6 +27,11 @@
 #include <input/input.h>
 #include <plume_vulkan.h>
 
+#ifdef __ANDROID__
+#include "android_video.h"
+#include <ui/touch_controls.h>
+#endif
+
 #include <res/bc_diff/button_bc_diff_gc.bin.h>
 #include <res/bc_diff/button_bc_diff_ps2.bin.h>
 #include <res/font/im_font_atlas.png.h>
@@ -405,6 +410,18 @@ static std::unique_ptr<RenderSwapChain> g_swapChain;
 static bool g_swapChainValid;
 
 static constexpr RenderFormat BACKBUFFER_FORMAT = RenderFormat::B8G8R8A8_UNORM;
+
+#ifdef __ANDROID__
+// Android window surfaces only offer RGBA-ordered formats, and plume refuses to create a
+// swap chain in a format the surface does not list. Everything the game renders stays
+// BGRA: its render targets are, the precompiled pipeline cache was recorded with BGRA
+// targets, and the back buffer is copied to and from BGRA textures. So on Android the
+// frame always goes to the intermediary back buffer and only the presentation pass,
+// which samples it, writes to the RGBA swap chain image.
+static constexpr RenderFormat SWAPCHAIN_FORMAT = RenderFormat::R8G8B8A8_UNORM;
+#else
+static constexpr RenderFormat SWAPCHAIN_FORMAT = BACKBUFFER_FORMAT;
+#endif
 
 // Sewer sez: Settings the FF pixel shader reads on every pixel (Vulkan only).
 //            We push these directly, rather than having GPU do mem read for faster
@@ -2231,6 +2248,30 @@ static std::atomic<bool> g_swapChainRebuildRequested{ false };
 static void CheckSwapChain(bool canRebuild)
 {
 	SetSwapChainVsync();
+
+#ifdef __ANDROID__
+	// Android takes the window surface away in the background and hands out a new one
+	// afterwards; see gpu/android_video.h.
+	switch (AndroidVideo::GetSurfaceState(g_swapChain.get(), GameWindow::s_pWindow))
+	{
+	case AndroidVideo::ESurfaceState::Unavailable:
+		// Nothing to present to. The frame is still rendered, just not shown.
+		g_swapChainValid = false;
+		g_swapChainRebuildRequested = false;
+		g_backBuffer->width = Video::s_viewportWidth;
+		g_backBuffer->height = Video::s_viewportHeight;
+		return;
+
+	case AndroidVideo::ESurfaceState::Replaced:
+		// Take the rebuild path below, which recreates the surface on the new window.
+		g_swapChainValid = false;
+		break;
+
+	case AndroidVideo::ESurfaceState::Ready:
+		break;
+	}
+#endif
+
 	const bool isSwapChainInvalid = !g_swapChainValid;
 	const bool needsRebuild = isSwapChainInvalid || g_swapChain->needsResize();
 	g_swapChainRebuildRequested = needsRebuild && !canRebuild;
@@ -2253,7 +2294,18 @@ static void CheckSwapChain(bool canRebuild)
 			}
 		}
 
-		if (g_vulkan)
+		bool hasSurface = true;
+
+#ifdef __ANDROID__
+		// The GPU is idle and nothing references the swap chain images any more, which is
+		// what replacing the surface needs. A no-op when the window did not change. If the
+		// window is gone again there is nothing to build a swap chain on; a later frame retries.
+		hasSurface = AndroidVideo::RecreateSurface(g_swapChain.get(), GameWindow::s_pWindow);
+#endif
+
+		if (!hasSurface)
+			g_swapChainValid = false;
+		else if (g_vulkan)
 			g_swapChainValid = Vulkan_RebuildSwapChain(isSwapChainInvalid ? "Swap Chain was invalid" : "size or present mode changed");
 		else
 			g_swapChainValid = g_swapChain->resize();
@@ -2266,6 +2318,11 @@ static void CheckSwapChain(bool canRebuild)
 		g_swapChainAcquireProfiler.Begin();
 		g_swapChainValid = g_swapChain->acquireTexture(g_acquireSemaphores[g_frame].get(), &g_backBufferIndex);
 		g_swapChainAcquireProfiler.End();
+
+#ifdef __ANDROID__
+		if (g_swapChainValid)
+			AndroidVideo::OnFramePresentable();
+#endif
 	}
 
 	if (g_needsResize)
@@ -2412,7 +2469,7 @@ static void BeginCommandList(bool canResizeSurfaces)
 		}
 
 		bool usingIntermediaryTexture = (width != g_swapChain->getWidth()) || (height != g_swapChain->getHeight()) ||
-			(abs(Config::Brightness.Value - 0.5f) > 0.001f) || resizedSurfaces;
+			(abs(Config::Brightness.Value - 0.5f) > 0.001f) || resizedSurfaces || (SWAPCHAIN_FORMAT != BACKBUFFER_FORMAT);
 
 		if (usingIntermediaryTexture)
 		{
@@ -2612,6 +2669,12 @@ bool Video::CreateHostDevice(const char* sdlVideoDriver, bool graphicsApiRetry)
 #endif
 
 	g_capabilities = g_device->getCapabilities();
+
+#ifdef __ANDROID__
+	// Mobile GPUs differ a lot in what they can sample; record it for bug reports.
+	AndroidVideo::LogDeviceSupport(g_device.get());
+#endif
+
 	FixedFunctionVertexShaderVariants::Initialize(g_device.get(), g_vulkan);
 	FixedFunctionPixelShaderVariants::Initialize(g_device.get(), g_vulkan);
 
@@ -2675,7 +2738,7 @@ bool Video::CreateHostDevice(const char* sdlVideoDriver, bool graphicsApiRetry)
 	RenderSwapChainDesc swapChainDesc;
 	swapChainDesc.renderWindow = GameWindow::s_renderWindow;
 	swapChainDesc.textureCount = bufferCount;
-	swapChainDesc.format = BACKBUFFER_FORMAT;
+	swapChainDesc.format = SWAPCHAIN_FORMAT;
 	swapChainDesc.maxFrameLatency = Config::MaxFrameLatency;
 	swapChainDesc.enablePresentWait = g_capabilities.presentWait;
 
@@ -2801,7 +2864,7 @@ bool Video::CreateHostDevice(const char* sdlVideoDriver, bool graphicsApiRetry)
 	desc.pipelineLayout = g_pipelineLayout.get();
 	desc.vertexShader = g_copyShader.get();
 	desc.pixelShader = gammaCorrectionShader.get();
-	desc.renderTargetFormat[0] = BACKBUFFER_FORMAT;
+	desc.renderTargetFormat[0] = SWAPCHAIN_FORMAT; // The presentation pass draws to the swap chain image.
 	desc.renderTargetBlend[0] = RenderBlendDesc::Copy();
 	desc.renderTargetCount = 1;
 	g_gammaCorrectionPipeline = g_device->createGraphicsPipeline(desc);
@@ -2953,7 +3016,17 @@ GuestShader* CreateShader(ResourceType resourceType)
 				}
 
 				auto shaderData = CreateRecompiledPixelShader(pXboxPixelShaderDef, &psdGuestInfo, &sizeShader);
-				shader->shader = CREATE_RUNTIME_SHADER(shaderData, sizeShader);
+				if (shaderData != nullptr)
+				{
+					shader->shader = CREATE_RUNTIME_SHADER(shaderData, sizeShader);
+				}
+				else
+				{
+					// No runtime shader compiler in this build (Android): draw with the generic
+					// fixed-function shader rather than crash on the missing one.
+					LOGFN_ERROR("CreateShader: PS hash={:016X} is missing from the shader cache and cannot be compiled at runtime.", hash);
+					shader->shader = CREATE_SHADER(FixedFunctionPixelShader);
+				}
 
 				UpdatePixelShaderCacheEntryNew(shader, hash);
 			}
@@ -2972,7 +3045,16 @@ GuestShader* CreateShader(ResourceType resourceType)
 				{
 					size_t sizeShader = 0;
 					auto shaderData = CreateRecompiledShader(hostVSHandle, &sizeShader);
-					shader->shader = CREATE_RUNTIME_SHADER(shaderData, sizeShader);
+					if (shaderData != nullptr)
+					{
+						shader->shader = CREATE_RUNTIME_SHADER(shaderData, sizeShader);
+					}
+					else
+					{
+						// See the pixel shader branch above.
+						LOGFN_ERROR("CreateShader: VS hash={:016X} is missing from the shader cache and cannot be compiled at runtime.", hash);
+						shader->shader = CREATE_SHADER(FixedFunctionVertexShader);
+					}
 				}
 
 				UpdateShaderCacheEntryNew(shader, hash);
@@ -3833,6 +3915,9 @@ static void DrawImGui(X86Context* ctx)
 	AchievementOverlay::Draw(ctx);
 	ButtonGuide::Draw();
 	InstallerWizard::Draw(ctx);
+#ifdef __ANDROID__
+	TouchControls::Draw(float(width), float(height));
+#endif
 	MessageWindow::Draw(ctx);
 	Fader::Draw();
 

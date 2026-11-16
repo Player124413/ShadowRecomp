@@ -13,6 +13,11 @@
 #include <os/logger.h>
 #include "imgui_utils.h"
 
+#ifdef __ANDROID__
+#include <os/android/lifecycle_android.h>
+#include <ui/touch_controls.h>
+#endif
+
 //Original code from Unleashed Recomp
 
 bool m_isFullscreenKeyReleased = true;
@@ -91,6 +96,24 @@ void GameWindow::DrainImGuiEvents()
 
 bool Window_OnSDLEvent(void*, SDL_Event* event)
 {
+#ifdef __ANDROID__
+    // Android removes the window surface while the app is in the background. SDL parks the
+    // event thread and pauses audio by itself; the game loop parks on this flag.
+    switch (event->type)
+    {
+    case SDL_EVENT_WILL_ENTER_BACKGROUND:
+    case SDL_EVENT_DID_ENTER_BACKGROUND:
+        os::android::SetAppPaused(true);
+        break;
+
+    case SDL_EVENT_DID_ENTER_FOREGROUND:
+        os::android::SetAppPaused(false);
+        break;
+    }
+
+    TouchControls::OnEvent(*event);
+#endif
+
     // Queue ImGui backend events
     if (IsImGuiBackendEvent(*event))
     {
@@ -217,6 +240,13 @@ void GameWindow::Init(const char* sdlVideoDriver)
     SDL_SetHint("SDL_APP_ID", "io.github.foxworkshop.shadowrecomp");
 #endif
 
+#ifdef __ANDROID__
+    // The window is resizable and SDL would otherwise hand the orientation back to the
+    // device's rotation lock, overriding the manifest: a phone held upright would then
+    // show the game sideways.
+    SDL_SetHint(SDL_HINT_ORIENTATIONS, "LandscapeLeft LandscapeRight");
+#endif
+
     if (sdlVideoDriver)
         SDL_SetHintWithPriority(SDL_HINT_VIDEO_DRIVER, sdlVideoDriver, SDL_HINT_OVERRIDE);
 
@@ -258,6 +288,12 @@ void GameWindow::Init(const char* sdlVideoDriver)
     s_pWindow = SDL_CreateWindowWithProperties(props);
     SDL_DestroyProperties(props);
 
+#ifdef __ANDROID__
+    // The window always covers the screen, whatever size was requested.
+    if (s_pWindow != nullptr)
+        SDL_GetWindowSize(s_pWindow, &s_width, &s_height);
+#endif
+
     if (IsFullscreen())
         SDL_HideCursor();
 
@@ -277,6 +313,10 @@ void GameWindow::Init(const char* sdlVideoDriver)
         DWM_WINDOW_CORNER_PREFERENCE wcp = DWMWCP_DONOTROUND;
         DwmSetWindowAttribute(s_renderWindow, DWMWA_WINDOW_CORNER_PREFERENCE, &wcp, sizeof(wcp));
     }*/
+#elif defined(__ANDROID__)
+    // plume renders to the ANativeWindow directly. Android replaces it whenever the app
+    // returns from the background; gpu/android_video.cpp follows it from there on.
+    s_renderWindow = (ANativeWindow*)SDL_GetPointerProperty(windowProps, SDL_PROP_WINDOW_ANDROID_WINDOW_POINTER, nullptr);
 #elif defined(PLUME_SDL_VULKAN_ENABLED)
     s_renderWindow = s_pWindow;
 #elif defined(__linux__)
@@ -391,6 +431,12 @@ bool GameWindow::IsFullscreen()
 
 bool GameWindow::SetFullscreen(bool isEnabled)
 {
+#ifdef __ANDROID__
+    // There are no windows on Android: the game always covers the screen. Leaving
+    // fullscreen would only bring back the system bars and desync the window size.
+    return true;
+#endif
+
     // undo borderless window before any fullscreen change
     if (s_isAllScreensOption)
     {
@@ -497,7 +543,14 @@ SDL_WindowFlags GameWindow::GetWindowFlags()
     if (Config::Fullscreen)
         flags |= SDL_WINDOW_FULLSCREEN;
 
-#if defined(SDL_VULKAN_ENABLED) || defined(PLUME_SDL_VULKAN_ENABLED)
+#ifdef __ANDROID__
+    // There are no windows on Android; fullscreen is what hides the system bars.
+    flags |= SDL_WINDOW_FULLSCREEN;
+#endif
+
+    // On Android the flag also keeps SDL from attaching an OpenGL ES surface to the window,
+    // which would make it unusable for Vulkan.
+#if defined(SDL_VULKAN_ENABLED) || defined(PLUME_SDL_VULKAN_ENABLED) || defined(__ANDROID__)
     flags |= SDL_WINDOW_VULKAN;
 #endif
 
@@ -543,6 +596,11 @@ int GameWindow::GetDisplay()
 
 void GameWindow::SetDisplay(int displayIndex)
 {
+#ifdef __ANDROID__
+    // Android decides which display the activity is shown on.
+    return;
+#endif
+
     if (!IsFullscreen())
         return;
 

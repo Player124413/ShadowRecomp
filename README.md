@@ -27,7 +27,7 @@
 ---
 
 Shadow Recompiled is an unofficial PC port of the original Xbox version of Shadow the Hedgehog (2005) created through the process of static recompilation.
-The port supports Windows and Linux.
+The port supports Windows and Linux. An experimental Android build is described in [ANDROID.md].
 
 **This project does not include any game assets. You must provide the files from your own legally acquired copy of the game to install or build Shadow Recompiled.**
 
@@ -42,6 +42,7 @@ The development of that recompiler was directly inspired by [XenonRecomp](https:
 - Operating System:
     - Windows 10 (1909+)
     - A modern Linux distro
+    - Android 10+ on a 64-bit ARM device (experimental, see [ANDROID.md])
 - Storage:
     - 2.4 GiB required
 
@@ -151,6 +152,7 @@ Supporting these files would require an entirely new recompilation to handle all
 
 - Windows: `%APPDATA%\ShadowRecomp\`
 - Linux: `~/.config/ShadowRecomp/`
+- Android: `.config/ShadowRecomp/` inside the game storage chosen in the launcher (see [ANDROID.md])
 
 Inside, saves are in `save/` and settings in `config.toml`.
 
@@ -195,6 +197,8 @@ We'd happily accept community contribution for macOS.
 But folks who want to support platforms that require more significant modifications 
 (e.g. touchscreen on mobile); should make a fork.
 
+This fork is one of those: it adds an experimental Android port, see [ANDROID.md].
+
 ## Known Issues
 
 Before reporting any issues, check if they are listed [here][issues].
@@ -202,6 +206,8 @@ Before reporting any issues, check if they are listed [here][issues].
 ## Building
 
 [Check out the building instructions here][BUILDING.md].
+
+For Android, see [ANDROID.md].
 
 ## Credits
 
@@ -243,6 +249,10 @@ Before reporting any issues, check if they are listed [here][issues].
 
 - Unleashed Recompiled Development Team: Created much of the ground work that made all of this possible and sped up development time considerably.
 
+- [UnleashedRecomp-Android](https://github.com/SansNope/UnleashedRecomp-Android): The Android port of Unleashed Recompiled. The Android launcher, driver loading and storage handling here are based on it, and the APK bundles its Turnip driver builds.
+
+- [libadrenotools](https://github.com/bylaws/libadrenotools): Loads custom Vulkan drivers on Android.
+
 - [Marathon Recompiled](https://github.com/sonicnext-dev/MarathonRecomp): Used as a reference for various features and help with debugging.
 
 - [Skyth](https://github.com/blueskythlikesclouds): Provided help to understand how Recompilation works, also the author of the original graphics pipeline code which was (mostly) reused here.
@@ -258,6 +268,7 @@ Before reporting any issues, check if they are listed [here][issues].
 [all releases]: https://github.com/FoxWorkshop/ShadowRecomp/releases
 [issue 44]: https://github.com/FoxWorkshop/ShadowRecomp/issues/44
 [BUILDING.md]: /docs/BUILDING.md
+[ANDROID.md]: /docs/ANDROID.md
 [XboxRecomp2]: https://sewer56.dev/XboxRecomp2
 [ultra0000]: https://github.com/ultra0000
 [Rawlins]: https://www.youtube.com/channel/UCjbUqRzVay-6HjoJjODre5w

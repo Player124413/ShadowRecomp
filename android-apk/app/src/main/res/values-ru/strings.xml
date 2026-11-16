@@ -1,0 +1,166 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Shadow Recompiled</string>
+    <string name="documents_game_title">Файлы игры Shadow Recompiled</string>
+    <string name="documents_game_summary">Активная игра, моды, конфигурация и сохранения</string>
+    <string name="documents_transfer_title">Обмен файлами Shadow Recompiled</string>
+    <string name="documents_transfer_summary">Импорт драйверов и логи</string>
+    <string name="mod_manager_launcher_name">Моды Shadow</string>
+    <string name="mod_manager_title">Моды Shadow</string>
+    <string name="mod_manager_hint">Скопируйте каждый мод отдельной папкой в каталог mods, обновите список, включите моды и задайте порядок их загрузки. Сохранение записывает профиль SA Mod Manager, который читает игра; для применения изменений перезапустите игру.</string>
+    <string name="mod_manager_open_files">Открыть «Файлы»</string>
+    <string name="mod_manager_refresh">Обновить</string>
+    <string name="mod_manager_save">Сохранить список</string>
+    <string name="mod_manager_empty">Моды не найдены. Нажмите «Открыть файлы», создайте mods/ и скопируйте туда моды, совместимые с SA Mod Manager (папки с mod.ini).</string>
+    <string name="mod_manager_found">Найдено совместимых модов: %1$d.</string>
+    <string name="mod_manager_saved">Сохранено активных модов: %1$d (в порядке приоритета).</string>
+    <string name="mod_manager_restart">Изменения модов применятся после перезапуска игры.</string>
+    <string name="mod_manager_error_directory">Не удалось создать каталог настроек: %1$s</string>
+    <string name="mod_manager_error_save">Не удалось сохранить базу модов: %1$s</string>
+    <string name="mod_manager_error_files">Не удалось открыть системное приложение «Файлы».</string>
+
+    <string name="launcher_title">Shadow Recompiled</string>
+    <string name="launcher_game_files">Файлы игры</string>
+    <string name="launcher_open_files">Открыть папку игры</string>
+    <string name="launcher_recheck">Проверить снова</string>
+    <string name="launcher_graphics">Графический драйвер</string>
+    <string name="launcher_driver">Драйвер Vulkan</string>
+    <string name="launcher_render_mode">Режим рендера Turnip</string>
+    <string name="launcher_import_driver">Импорт .so / .zip</string>
+    <string name="launcher_driver_folder">Папка драйверов</string>
+    <string name="launcher_controls">Управление</string>
+    <string name="launcher_touch_policy">Экранные кнопки</string>
+    <string name="launcher_touch_camera">Управление камерой</string>
+    <string name="launcher_edit_layout">Настроить расположение кнопок</string>
+    <string name="launcher_mods">Моды</string>
+    <string name="launcher_mods_summary">Включайте моды, совместимые с SA Mod Manager, задавайте порядок их загрузки и переключайте встроенные коды.</string>
+    <string name="launcher_manage_mods">Управление модами</string>
+    <string name="launcher_debug">Отладка</string>
+    <string name="launcher_show_fps">Показывать FPS</string>
+    <string name="launcher_open_logs">Открыть логи</string>
+    <string name="launcher_play">Запустить игру</string>
+    <string name="launcher_section_graphics">Графика</string>
+    <string name="launcher_section_updates">Обновления</string>
+    <string name="launcher_section_advanced">Дополнительно</string>
+    <string name="launcher_chip_game_ready">Игра готова</string>
+    <string name="launcher_chip_game_missing">Игра не установлена</string>
+    <string name="launcher_chip_staged">Ожидает установки</string>
+    <string name="launcher_summary_driver">Драйвер: %1$s</string>
+    <string name="launcher_summary_audio">Звук: %1$s</string>
+    <string name="launcher_quick_files">Файлы</string>
+    <string name="launcher_exit">Выход</string>
+    <string name="launcher_exit_running">Игра всё ещё работает в фоне. Выход закроет её, несохранённый прогресс будет потерян.</string>
+    <string name="launcher_driver_pending">Пакетов драйвера для установки при следующем запуске: %1$d.</string>
+    <string name="launcher_driver_installed">Доступен импортированный драйвер: %1$s</string>
+    <string name="launcher_driver_builtin">Доступны системный и встроенные драйверы Turnip. Импортированный драйвер не найден.</string>
+    <string name="launcher_driver_recovery">Предыдущий запуск Vulkan не завершился. Автовосстановление выберет безопасный драйвер; если ошибка повторится, выберите здесь «Системный».</string>
+    <string name="launcher_log_found">Найден последний лог (%1$s).</string>
+    <string name="launcher_log_missing">Лога пока нет. Он появится после запуска игры.</string>
+    <string name="error_title">Нельзя продолжить</string>
+    <string name="error_storage_create">Не удалось создать папку приложения:\n%1$s\n\nПроверьте свободное место и доступность накопителя.</string>
+    <string name="error_storage_write">Нет доступа на запись в папку игры:\n%1$s\n\nВозможно, её создали через adb от другого пользователя. Удалите папку и позвольте приложению создать её заново.</string>
+    <string name="error_game_missing">Файлы игры не установлены. Нажмите «Установить игру» и выберите образ диска Shadow the Hedgehog для Xbox (.iso), ZIP-архив или папку распакованного диска, в которой лежит default.xbe.\n\nХранилище игры:\n%1$s</string>
+    <string name="error_game_nested">Файл default.xbe найден не там, где нужно (%1$s). Игра ожидает его по пути game/default.xbe внутри:\n%2$s\n\nИспользуйте «Установить игру», чтобы импортировать и проверить файлы, а не копировать их вручную.</string>
+    <string name="error_settings_save">Не удалось сохранить настройки: %1$s</string>
+    <string name="error_layout_editor">Не удалось запустить редактор управления: %1$s</string>
+    <string name="error_layout_requires_game">Редактор использует рендер игры, поэтому сначала нужна корректная установка файлов игры.</string>
+    <string name="error_driver_extension">Выберите обычную библиотеку Vulkan .so или пакет AdrenoTools/ExynosTools в формате .zip.</string>
+    <string name="error_driver_copy">Не удалось импортировать драйвер: %1$s</string>
+    <string name="error_open_files">Не удалось открыть папку приложения в системных «Файлах».</string>
+    <string name="driver_imported">%1$s скопирован. Драйвер будет проверен и установлен при запуске игры.</string>
+    <string name="launcher_install_game">Установить игру (.iso / .zip / папка)</string>
+    <string name="launcher_install_mod">Установить мод (.zip / папка)</string>
+    <string name="install_source_zip">Из ZIP-архива</string>
+    <string name="install_source_folder">Из папки</string>
+    <string name="install_progress_title">Установка…</string>
+    <string name="install_progress_status">Скопировано файлов: %1$d, %2$s</string>
+    <string name="install_scanning">Чтение источника…</string>
+    <string name="install_cancel">Отмена</string>
+    <string name="launcher_install_staged">Файлы игры готовы к установке. Запустите игру для их проверки и установки.</string>
+    <string name="install_done_mod">Установлено модов: %1$d. Включите их в менеджере модов.</string>
+    <string name="install_cancelled">Установка отменена.</string>
+    <string name="install_cancelled_partial">Установка отменена. Частично скопированные файлы остались на месте.</string>
+    <string name="error_install_failed">Установка не удалась: %1$s</string>
+    <string name="error_install_no_game">В выбранном источнике нет файлов Shadow the Hedgehog (Xbox). Выберите образ диска Xbox (.iso) либо папку или ZIP, где есть default.xbe.</string>
+    <string name="error_install_no_mod">В выбранном источнике нет mod.ini — мод не найден.</string>
+
+    <string-array name="driver_labels">
+        <item>Авто (рекомендуется)</item><item>Системный</item><item>Встроенный Turnip</item><item>Adreno 710 (Vauzi)</item><item>A725 Performance (эксперимент; sysmem+nobin)</item><item>Adreno 8xx (Snapdragon 8 Elite; sysmem+nobin)</item><item>Импортированный</item>
+    </string-array>
+    <string-array name="render_mode_labels">
+        <item>Авто (рекомендуется)</item><item>GMEM</item><item>Sysmem</item>
+    </string-array>
+    <string name="launcher_audio">Звук</string>
+    <string name="launcher_audio_preset">Пресет звука</string>
+    <string name="launcher_audio_preset_hint">Выберите «Совместимость», если звук трещит или заикается. «Низкая задержка» использует меньший буфер и может давать треск на медленных устройствах. Применяется при следующем запуске.</string>
+    <string-array name="audio_preset_labels">
+        <item>По умолчанию (рекомендуется)</item><item>Совместимость (большой буфер)</item><item>Низкая задержка</item>
+    </string-array>
+    <string-array name="touch_policy_labels">
+        <item>Авто</item><item>Всегда включены</item><item>Выключены</item>
+    </string-array>
+    <string-array name="touch_camera_labels">
+        <item>Свайп по экрану</item><item>Правый стик</item><item>Выключено</item>
+    </string-array>
+
+    <string name="documents_save_title">Сохранения Shadow Recompiled</string>
+    <string name="documents_save_summary">Данные сохранений (Save.dat) и достижения</string>
+    <string name="launcher_open_saves">Открыть папку сохранений</string>
+    <string name="mod_manager_codes">Коды</string>
+    <string name="mod_manager_codes_hint">Встроенные патчи, применяемые при запуске. Сохраняются вместе со списком модов; для применения перезапустите игру.</string>
+    <string name="launcher_updates">Обновления приложения</string>
+    <string name="update_current_version">Установлена версия: %1$s</string>
+    <string name="update_check">Проверить обновления</string>
+    <string name="update_checking">Проверяем обновления на GitHub…</string>
+    <string name="update_error">Не удалось проверить обновления: %1$s</string>
+    <string name="update_up_to_date">Установлена актуальная версия %1$s.</string>
+    <string name="update_up_to_date_short">У вас уже установлена последняя версия.</string>
+    <string name="update_available">Доступна версия %1$s.</string>
+    <string name="update_dialog_title">Доступно обновление</string>
+    <string name="update_dialog_message">Версия %1$s (%2$s) готова к загрузке.\n\n%3$s</string>
+    <string name="update_later">Позже</string>
+    <string name="update_download">Скачать</string>
+    <string name="update_downloading">Загрузка обновления…</string>
+    <string name="update_download_progress">Скачано %1$s из %2$s</string>
+    <string name="update_ready_to_install">Обновление скачано. Продолжите в системном установщике Android.</string>
+    <string name="storage_choose">Выбрать хранилище игры</string>
+    <string name="storage_current">Хранилище игры:\n%1$s</string>
+    <string name="storage_auto">Автоматически (существующая установка)</string>
+    <string name="storage_internal">Внутренняя память приложения</string>
+    <string name="storage_app">%1$s — папка приложения</string>
+    <string name="storage_media">%1$s — папка Android/media</string>
+    <string name="storage_unavailable">Выбранное хранилище недоступно:\n%1$s\n\nПодключите SD-карту или выберите другое хранилище.</string>
+    <string name="storage_confirm">Использовать эту папку для игры, модов, настроек и сохранений:\n%1$s\n\nФайлы в прежней папке сохранятся. «Скопировать текущую установку» копирует и проверяет всё перед переключением. Без копирования будут использованы игра и сохранения, уже находящиеся в выбранной папке.</string>
+    <string name="storage_use">Использовать папку</string>
+    <string name="storage_copy">Скопировать текущую установку</string>
+    <string name="storage_copying">Копирование и проверка игры, модов и сохранений…</string>
+    <string name="storage_copy_progress">Скопировано %1$s. Проверка файлов…</string>
+    <string name="storage_copied">Установка скопирована и проверена. Выбранное хранилище активно, исходные файлы сохранены.</string>
+    <string name="storage_busy">Дождитесь завершения текущей операции с файлами.</string>
+    <string name="storage_restart">Полностью закройте и откройте приложение перед сменой хранилища или импортом игры. В этом процессе уже запущена игровая сессия.</string>
+    <string name="error_io_create">Не удалось создать папку:\n%1$s</string>
+    <string name="error_io_read">Не удалось прочитать папку:\n%1$s</string>
+    <string name="error_zip_cancelled">Импорт ZIP отменён.</string>
+    <string name="error_zip_path">В ZIP указан недопустимый путь к файлу:\n%1$s</string>
+    <string name="error_zip_duplicate">В ZIP есть повторяющиеся записи этого файла:\n%1$s</string>
+    <string name="error_zip_empty">В ZIP нет файлов.</string>
+    <string name="error_copy_separate">Исходная и целевая папки должны быть разными и не могут находиться одна внутри другой.</string>
+    <string name="error_copy_empty">Для копирования нужна пустая целевая папка.</string>
+    <string name="error_copy_link">В установке есть символическая ссылка, которую нельзя скопировать:\n%1$s</string>
+    <string name="error_copy_verify">Проверка копии не пройдена. Текущая установка сохранена. Файл:\n%1$s</string>
+    <string name="error_copy_cancelled">Копирование отменено. Текущая установка сохранена.</string>
+    <string name="error_storage_selection">Не удалось сохранить выбор хранилища.</string>
+    <string name="storage_native_unavailable">Выбранное хранилище игры недоступно или защищено от записи. Подключите SD-карту или выберите другое хранилище в лаунчере.</string>
+    <string name="installer_failed">Не удалось установить файлы игры:\n%1$s\n\nИспользуйте неповреждённый образ диска Shadow the Hedgehog (Xbox) и проверьте свободное место. Подробности в журнале.</string>
+    <string name="installer_game_missing">Файлы игры не найдены. Нажмите «Установить игру» в лаунчере, чтобы импортировать образ диска Xbox (.iso), ZIP-архив или папку распакованного диска.</string>
+    <string name="error_file_empty">Выбранный файл пуст.</string>
+    <string name="game_ready">Готово к запуску. Файлы игры обнаружены.</string>
+    <string name="install_source_iso">Из образа диска Xbox (.iso)</string>
+    <string name="install_done_staged">Файлы игры подготовлены. Нажмите «Запустить игру»: перед первым запуском они будут проверены и установлены.</string>
+    <string name="launcher_controls_hint">Эти параметры управляют экранным геймпадом. В режиме «Авто» он скрывается, пока подключён физический контроллер. «Расположить сенсорные элементы» открывает редактор раскладки в игре.</string>
+    <string name="installer_source_missing">В подготовленных файлах нет образа диска Xbox (.iso) и нет папки с default.xbe. Импортируйте игру заново из лаунчера.</string>
+    <string name="native_install_title">Установка файлов игры</string>
+    <string name="native_install_message">Проверка и копирование файлов игры. Это займёт несколько минут; не закрывайте приложение.</string>
+    <string name="update_disabled">Проверка обновлений в этой сборке не настроена.</string>
+    <string name="vulkan_startup_failed">Не удалось запустить графический драйвер. Выберите в лаунчере другой драйвер Vulkan (попробуйте «Системный» или «Авто») и запустите игру снова.</string>
+</resources>

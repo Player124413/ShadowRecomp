@@ -1,0 +1,165 @@
+<resources>
+    <string name="app_name">Shadow Recompiled</string>
+    <string name="documents_game_title">Shadow Recompiled game files</string>
+    <string name="documents_game_summary">Active game, mods, configuration and saves</string>
+    <string name="documents_transfer_title">Shadow Recompiled transfers</string>
+    <string name="documents_transfer_summary">Driver imports and logs</string>
+    <string name="mod_manager_launcher_name">Shadow Mods</string>
+    <string name="mod_manager_title">Shadow Mods</string>
+    <string name="mod_manager_hint">Copy each mod folder into the mods directory, refresh this list, enable mods and arrange their load order. Save writes the SA Mod Manager profile the game reads; restart the game to apply changes.</string>
+    <string name="mod_manager_open_files">Open Files</string>
+    <string name="mod_manager_refresh">Refresh</string>
+    <string name="mod_manager_save">Save mod list</string>
+    <string name="mod_manager_empty">No mods found. Use Open Files, create mods/, then copy SA Mod Manager compatible mods (folders with a mod.ini) into it.</string>
+    <string name="mod_manager_found">Found %1$d compatible mods.</string>
+    <string name="mod_manager_saved">Saved %1$d enabled mods in priority order.</string>
+    <string name="mod_manager_restart">Mod changes will apply after the game is restarted.</string>
+    <string name="mod_manager_error_directory">Cannot create configuration directory: %1$s</string>
+    <string name="mod_manager_error_save">Cannot save the mod database: %1$s</string>
+    <string name="mod_manager_error_files">Android Files could not be opened.</string>
+
+    <string name="launcher_title">Shadow Recompiled</string>
+    <string name="launcher_game_files">Game files</string>
+    <string name="launcher_open_files">Open game folder</string>
+    <string name="launcher_recheck">Check again</string>
+    <string name="launcher_graphics">Graphics driver</string>
+    <string name="launcher_driver">Vulkan driver</string>
+    <string name="launcher_render_mode">Turnip render mode</string>
+    <string name="launcher_import_driver">Import .so / .zip</string>
+    <string name="launcher_driver_folder">Driver folder</string>
+    <string name="launcher_controls">Controls</string>
+    <string name="launcher_touch_policy">On-screen controls</string>
+    <string name="launcher_touch_camera">Camera control</string>
+    <string name="launcher_edit_layout">Arrange touch controls</string>
+    <string name="launcher_mods">Mods</string>
+    <string name="launcher_mods_summary">Enable SA Mod Manager compatible mods, set their load order and toggle built-in codes.</string>
+    <string name="launcher_manage_mods">Manage mods</string>
+    <string name="launcher_debug">Debug options</string>
+    <string name="launcher_show_fps">Show FPS</string>
+    <string name="launcher_open_logs">Open logs</string>
+    <string name="launcher_play">Launch game</string>
+    <string name="launcher_section_graphics">Graphics</string>
+    <string name="launcher_section_updates">Updates</string>
+    <string name="launcher_section_advanced">Advanced</string>
+    <string name="launcher_chip_game_ready">Game ready</string>
+    <string name="launcher_chip_game_missing">Game not installed</string>
+    <string name="launcher_chip_staged">Install pending</string>
+    <string name="launcher_summary_driver">Driver: %1$s</string>
+    <string name="launcher_summary_audio">Audio: %1$s</string>
+    <string name="launcher_quick_files">Files</string>
+    <string name="launcher_exit">Exit</string>
+    <string name="launcher_exit_running">The game is still running in the background. Exiting closes it, and unsaved progress is lost.</string>
+    <string name="launcher_driver_pending">%1$d driver package(s) will be installed on the next launch.</string>
+    <string name="launcher_driver_installed">Imported driver available: %1$s</string>
+    <string name="launcher_driver_builtin">Bundled Turnip drivers and the system driver are available. No imported driver found.</string>
+    <string name="launcher_driver_recovery">The previous Vulkan startup did not finish. Auto recovery will use a safer driver; choose System here if the problem repeats.</string>
+    <string name="launcher_log_found">Latest log found (%1$s).</string>
+    <string name="launcher_log_missing">No log yet. A log is created when the game starts.</string>
+    <string name="error_title">Cannot continue</string>
+    <string name="error_storage_create">The app cannot create its storage folder:\n%1$s\n\nCheck free space and storage availability.</string>
+    <string name="error_storage_write">The game folder is not writable:\n%1$s\n\nIt may have been created by adb or another user. Delete it and let the app recreate it.</string>
+    <string name="error_game_missing">Game files are not installed. Tap Install game and choose your Shadow the Hedgehog Xbox disc image (.iso), a ZIP archive, or the folder of an extracted disc that contains default.xbe.\n\nGame storage:\n%1$s</string>
+    <string name="error_game_nested">default.xbe was found in the wrong place (%1$s). The game expects it at game/default.xbe inside:\n%2$s\n\nUse Install game to import and verify the files instead of copying them by hand.</string>
+    <string name="error_settings_save">Could not save settings: %1$s</string>
+    <string name="error_layout_editor">Could not start the layout editor: %1$s</string>
+    <string name="error_layout_requires_game">The layout editor uses the game renderer, so a valid game installation is required.</string>
+    <string name="error_driver_extension">Choose a plain Vulkan .so file or an AdrenoTools/ExynosTools .zip package.</string>
+    <string name="error_driver_copy">Could not import the driver: %1$s</string>
+    <string name="error_open_files">Android Files could not open the application folder.</string>
+    <string name="driver_imported">%1$s was copied. It will be validated and installed at game launch.</string>
+    <string name="launcher_install_game">Install game (.iso / .zip / folder)</string>
+    <string name="launcher_install_mod">Install a mod (.zip / folder)</string>
+    <string name="install_source_zip">From a ZIP archive</string>
+    <string name="install_source_folder">From a folder</string>
+    <string name="install_progress_title">Installing…</string>
+    <string name="install_progress_status">%1$d files copied, %2$s</string>
+    <string name="install_scanning">Reading the source…</string>
+    <string name="install_cancel">Cancel</string>
+    <string name="launcher_install_staged">Game files are ready to install. Launch the game to verify and install them.</string>
+    <string name="install_done_mod">Installed mods: %1$d. Enable them in the mod manager.</string>
+    <string name="install_cancelled">Installation cancelled.</string>
+    <string name="install_cancelled_partial">Installation cancelled. Partially copied files were left in place.</string>
+    <string name="error_install_failed">Installation failed: %1$s</string>
+    <string name="error_install_no_game">The selected source contains no Shadow the Hedgehog (Xbox) files. Choose an Xbox disc image (.iso), or a folder or ZIP that contains default.xbe.</string>
+    <string name="error_install_no_mod">The selected source does not contain a mod.ini, so no mod could be found in it.</string>
+
+    <string-array name="driver_labels">
+        <item>Auto (recommended)</item><item>System</item><item>Bundled Turnip</item><item>Adreno 710 (Vauzi)</item><item>A725 Performance (experimental; sysmem+nobin)</item><item>Adreno 8xx (Snapdragon 8 Elite; sysmem+nobin)</item><item>Imported</item>
+    </string-array>
+    <string-array name="render_mode_labels">
+        <item>Auto (recommended)</item><item>GMEM</item><item>Sysmem</item>
+    </string-array>
+    <string name="launcher_audio">Audio</string>
+    <string name="launcher_audio_preset">Audio preset</string>
+    <string name="launcher_audio_preset_hint">Choose Compatibility if the sound crackles or stutters. Low latency uses a smaller buffer and may crackle on slower devices. Takes effect on the next launch.</string>
+    <string-array name="audio_preset_labels">
+        <item>Default (recommended)</item><item>Compatibility (larger buffer)</item><item>Low latency</item>
+    </string-array>
+    <string-array name="touch_policy_labels">
+        <item>Auto</item><item>Always on</item><item>Off</item>
+    </string-array>
+    <string-array name="touch_camera_labels">
+        <item>Swipe on screen</item><item>Right stick</item><item>Off</item>
+    </string-array>
+
+    <string name="documents_save_title">Shadow Recompiled saves</string>
+    <string name="documents_save_summary">Save data (Save.dat) and achievements</string>
+    <string name="launcher_open_saves">Open saves folder</string>
+    <string name="mod_manager_codes">Codes</string>
+    <string name="mod_manager_codes_hint">Built-in patches applied at boot. Saved with the mod list; restart the game to apply.</string>
+    <string name="launcher_updates">Application updates</string>
+    <string name="update_current_version">Installed version: %1$s</string>
+    <string name="update_check">Check for updates</string>
+    <string name="update_checking">Checking GitHub for updates…</string>
+    <string name="update_error">Update check failed: %1$s</string>
+    <string name="update_up_to_date">Version %1$s is up to date.</string>
+    <string name="update_up_to_date_short">You already have the latest version.</string>
+    <string name="update_available">Version %1$s is available.</string>
+    <string name="update_dialog_title">Update available</string>
+    <string name="update_dialog_message">Version %1$s (%2$s) is ready to download.\n\n%3$s</string>
+    <string name="update_later">Later</string>
+    <string name="update_download">Download</string>
+    <string name="update_downloading">Downloading the update…</string>
+    <string name="update_download_progress">Downloaded %1$s of %2$s</string>
+    <string name="update_ready_to_install">Update downloaded. Continue in the Android installer.</string>
+    <string name="storage_choose">Choose game storage</string>
+    <string name="storage_current">Game storage:\n%1$s</string>
+    <string name="storage_auto">Automatic (existing installation)</string>
+    <string name="storage_internal">Private internal storage</string>
+    <string name="storage_app">%1$s — app folder</string>
+    <string name="storage_media">%1$s — Android/media folder</string>
+    <string name="storage_unavailable">Selected storage is unavailable:\n%1$s\n\nReconnect the SD card or choose another storage location.</string>
+    <string name="storage_confirm">Use this folder for the game, mods, settings and saves:\n%1$s\n\nFiles in the previous folder will be kept. Choose Copy current installation to copy and verify everything before switching. Using a folder without copying opens the installation and saves stored there.</string>
+    <string name="storage_use">Use this folder</string>
+    <string name="storage_copy">Copy current installation</string>
+    <string name="storage_copying">Copying and verifying the game, mods and saves…</string>
+    <string name="storage_copy_progress">Copied %1$s. Verifying files…</string>
+    <string name="storage_copied">Installation copied and verified. The selected storage is now active; the original files were kept.</string>
+    <string name="storage_busy">Wait for the current file operation to finish.</string>
+    <string name="storage_restart">Fully close and reopen the app before changing storage or importing game files. A game session is already running in this process.</string>
+    <string name="error_io_create">Cannot create the folder:\n%1$s</string>
+    <string name="error_io_read">Cannot read the folder:\n%1$s</string>
+    <string name="error_zip_cancelled">ZIP import cancelled.</string>
+    <string name="error_zip_path">The ZIP contains an invalid file path:\n%1$s</string>
+    <string name="error_zip_duplicate">The ZIP contains duplicate entries for this file:\n%1$s</string>
+    <string name="error_zip_empty">The ZIP contains no files.</string>
+    <string name="error_copy_separate">The source and destination folders must be separate and cannot contain each other.</string>
+    <string name="error_copy_empty">Copying requires an empty destination folder.</string>
+    <string name="error_copy_link">This installation contains a symbolic link that cannot be copied:\n%1$s</string>
+    <string name="error_copy_verify">Copy verification failed. The current installation was kept. File:\n%1$s</string>
+    <string name="error_copy_cancelled">Copy cancelled. The current installation was kept.</string>
+    <string name="error_storage_selection">Could not save the storage selection.</string>
+    <string name="storage_native_unavailable">The selected game storage is unavailable or not writable. Reconnect the SD card or choose another storage location in the launcher.</string>
+    <string name="installer_failed">Could not install the game files:\n%1$s\n\nUse an intact Shadow the Hedgehog (Xbox) disc image and check the free space. Details are in the log.</string>
+    <string name="installer_game_missing">Game files not found. Use Install game in the launcher to import your Xbox disc image (.iso), a ZIP archive or an extracted disc folder.</string>
+    <string name="error_file_empty">The selected file is empty.</string>
+    <string name="game_ready">Ready to launch. The game files were detected.</string>
+    <string name="install_source_iso">From an Xbox disc image (.iso)</string>
+    <string name="install_done_staged">The game files are staged. Tap Launch game: they are verified and installed before the first start.</string>
+    <string name="launcher_controls_hint">These options control the on-screen gamepad. Auto hides it while a physical controller is connected. Arrange touch controls opens the layout editor in the game.</string>
+    <string name="installer_source_missing">The staged files contain no Xbox disc image (.iso) and no folder with default.xbe. Import the game again from the launcher.</string>
+    <string name="native_install_title">Installing game files</string>
+    <string name="native_install_message">Verifying and copying the game files. This takes a few minutes; do not close the app.</string>
+    <string name="update_disabled">Update checks are not configured for this build.</string>
+    <string name="vulkan_startup_failed">The graphics driver could not be started. Select another Vulkan driver in the launcher (try System or Auto) and start the game again.</string>
+</resources>

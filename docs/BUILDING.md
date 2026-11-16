@@ -1,5 +1,9 @@
 # Building
 
+> [!NOTE]
+> This page covers Windows and Linux. The Android build has its own page,
+> [ANDROID.md](ANDROID.md), and starts with steps 1 and 2 below.
+
 ## 1. Clone the Repository
 
 Clone **ShadowRecomp** with submodules using [Git].

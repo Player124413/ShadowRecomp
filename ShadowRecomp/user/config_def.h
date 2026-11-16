@@ -30,6 +30,13 @@ CONFIG_DEFINE_LOCALISED("Input", float, StickSensitivity1P, 1.0f, false);
 CONFIG_DEFINE_LOCALISED("Input", float, StickSensitivity2P, 1.0f, false);
 CONFIG_DEFINE_LOCALISED_OPTIONAL("Input", float, StickSensitivity3P, 1.0f, false);
 CONFIG_DEFINE_LOCALISED_OPTIONAL("Input", float, StickSensitivity4P, 1.0f, false);
+#ifdef __ANDROID__
+// Android-only options are set in the launcher, not in the in-game menu. They must stay
+// inside the block of their section: Config::Save() opens a new TOML table every time
+// the section name changes, and a repeated table makes the file unparseable.
+CONFIG_DEFINE_ENUM("Input", ETouchControls, TouchControls, ETouchControls::Auto, false);
+CONFIG_DEFINE_ENUM("Input", ETouchCamera, TouchCamera, ETouchCamera::Swipe, false);
+#endif
 
 CONFIG_DEFINE_ENUM("Bindings", SDL_Scancode, Key_A, SDL_SCANCODE_X, false);
 CONFIG_DEFINE_ENUM("Bindings", SDL_Scancode, Key_B, SDL_SCANCODE_C, false);
@@ -90,6 +97,9 @@ CONFIG_DEFINE_LOCALISED("Audio", bool, MuteOnFocusLost, true, false);
 CONFIG_DEFINE_LOCALISED("Audio", bool, IdleChaosPowersMusic, true, false);
 
 CONFIG_DEFINE_LOCALISED("Audio", bool, MusicAttenuation, false, false);
+#ifdef __ANDROID__
+CONFIG_DEFINE_ENUM("Audio", EAndroidAudioPreset, AndroidAudioPreset, EAndroidAudioPreset::Default, true);
+#endif
 
 CONFIG_DEFINE("Video", std::string, GraphicsDevice, "", true);
 CONFIG_DEFINE("Video", int32_t, WindowX, WINDOWPOS_CENTRED, false);
@@ -115,6 +125,10 @@ CONFIG_DEFINE_ENUM_LOCALISED("Video", EGraphicsAPI, GraphicsAPI, EGraphicsAPI::A
 CONFIG_DEFINE_LOCALISED("Video", bool, ShowFPS, false, false);
 CONFIG_DEFINE("Video", float, ProfilerFontScale, 0.7f, false);
 CONFIG_DEFINE("Video", uint32_t, MaxFrameLatency, 2, false);
+#ifdef __ANDROID__
+CONFIG_DEFINE_ENUM("Video", EAndroidVulkanDriver, VulkanDriver, EAndroidVulkanDriver::Auto, true);
+CONFIG_DEFINE_ENUM("Video", EAndroidRenderMode, RenderMode, EAndroidRenderMode::Auto, true);
+#endif
 
 CONFIG_DEFINE_HIDDEN("Codes", bool, QuickBoot, false, false);
 CONFIG_DEFINE_HIDDEN("Codes", bool, InfiniteLives, false, false);

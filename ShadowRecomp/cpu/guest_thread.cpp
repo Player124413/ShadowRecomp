@@ -11,7 +11,7 @@
 #ifdef _WIN32
 #include <windows.h>
 #include <intrin.h>
-#else
+#elif defined(__x86_64__) || defined(__i386__)
 #include <x86intrin.h>
 #endif
 

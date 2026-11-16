@@ -3,14 +3,30 @@
 #
 cmake_minimum_required (VERSION 3.20)
 
-if(NOT DEFINED ENV{VCPKG_ROOT})
-    message(FATAL_ERROR "VCPKG_ROOT is not defined!")
+# Android: the game is cross-compiled into libmain.so with the NDK's CMake toolchain file
+# and packaged by the Gradle project in android-apk/ (see docs/ANDROID.md). The toolchain
+# file is only loaded by project(), so until then the target is recognised by what an NDK
+# build passes on the command line.
+if (CMAKE_SYSTEM_NAME STREQUAL "Android" OR DEFINED ANDROID_ABI OR DEFINED ANDROID_PLATFORM OR CMAKE_TOOLCHAIN_FILE MATCHES "android\\.toolchain\\.cmake$")
+    set(SHADOW_RECOMP_ANDROID_DEFAULT ON)
+else()
+    set(SHADOW_RECOMP_ANDROID_DEFAULT OFF)
 endif()
 
-include($ENV{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake)
+option(SHADOW_RECOMP_ANDROID "Build the Android library (libmain.so). Does not use vcpkg." ${SHADOW_RECOMP_ANDROID_DEFAULT})
 
-if(VCPKG_TARGET_TRIPLET MATCHES "static")
-    set(VCPKG_APPLOCAL_DEPS OFF)
+# The Android build has no vcpkg dependencies: FreeType is built from source and the
+# desktop-only libraries (curl, nativefiledialog, dbus, the D3D12 SDK) are not used.
+if (NOT SHADOW_RECOMP_ANDROID)
+    if(NOT DEFINED ENV{VCPKG_ROOT})
+        message(FATAL_ERROR "VCPKG_ROOT is not defined!")
+    endif()
+
+    include($ENV{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake)
+
+    if(VCPKG_TARGET_TRIPLET MATCHES "static")
+        set(VCPKG_APPLOCAL_DEPS OFF)
+    endif()
 endif()
 
 set(SHADOW_RECOMP_THIRDPARTY_ROOT ${CMAKE_SOURCE_DIR}/thirdparty)
@@ -28,6 +44,40 @@ endif()
 set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
 
 project ("ShadowRecomp-ALL")
+
+if (SHADOW_RECOMP_ANDROID AND NOT ANDROID)
+    message(FATAL_ERROR
+        "SHADOW_RECOMP_ANDROID needs the Android NDK toolchain. Use one of the android-* presets, "
+        "or pass -DCMAKE_TOOLCHAIN_FILE=<ndk>/build/cmake/android.toolchain.cmake (see docs/ANDROID.md).")
+elseif (ANDROID AND NOT SHADOW_RECOMP_ANDROID)
+    message(FATAL_ERROR "An Android toolchain is in use: configure with -DSHADOW_RECOMP_ANDROID=ON (see docs/ANDROID.md).")
+endif()
+
+if (SHADOW_RECOMP_ANDROID)
+    # The recompiled game needs a 64-bit host, and the bundled Vulkan driver loader
+    # (libadrenotools) only exists for arm64.
+    if (NOT CMAKE_ANDROID_ARCH_ABI STREQUAL "arm64-v8a")
+        message(FATAL_ERROR "Only the arm64-v8a ABI is supported on Android (got '${CMAKE_ANDROID_ARCH_ABI}').")
+    endif()
+
+    # Everything ends up in shared objects that Android loads from the APK: the search
+    # path baked in for the build tree would be meaningless on a device.
+    set(CMAKE_POSITION_INDEPENDENT_CODE ON)
+    set(CMAKE_SKIP_RPATH ON)
+
+    # Devices with 16 KB memory pages (Android 15 and later) refuse libraries whose
+    # segments are aligned for 4 KB only. NDK r28 and later do this by default.
+    add_link_options("LINKER:-z,max-page-size=16384")
+
+    # Nothing here uses C++20 modules. Without this, SDL's only C++ source on Android is
+    # scanned for them, which needs clang-scan-deps from the toolchain for no benefit.
+    set(CMAKE_CXX_SCAN_FOR_MODULES OFF)
+
+    # Leave fmt's OS layer (fmt/os.h) out of the library: the game does not use it, and at
+    # the revision pinned by tools/XboxRecomp it is the one fmt source that does not
+    # compile against libc++ (it calls malloc() without including <cstdlib>).
+    set(FMT_OS OFF CACHE BOOL "" FORCE)
+endif()
 
 # Ship symbols with release builds (for now)
 if (MSVC)
@@ -62,8 +112,17 @@ if (SHADOW_RECOMP_HAS_ZERO_CALL_USED_REGS)
 endif()
 
 
+if (SHADOW_RECOMP_ANDROID)
+    include("${SHADOW_RECOMP_TOOLS_ROOT}/android/android.cmake")
+    shadow_recomp_android_host_tools()
+endif()
+
 add_subdirectory(${SHADOW_RECOMP_THIRDPARTY_ROOT})
 add_subdirectory(${SHADOW_RECOMP_TOOLS_ROOT})
+
+if (SHADOW_RECOMP_ANDROID)
+    shadow_recomp_android_finish_tools()
+endif()
 
 # Include sub-projects.
 add_subdirectory("ShadowRecompLib")

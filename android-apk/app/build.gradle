@@ -1,0 +1,109 @@
+apply plugin: 'com.android.application'
+
+// The game version is the single source of truth shared with the desktop builds.
+def versionFile = file('../../ShadowRecomp/res/version.txt')
+def versionField = { String name ->
+    def matcher = versionFile.text =~ /(?m)^${name}="?([^"\r\n]*)"?\s*$/
+    return matcher.find() ? matcher.group(1) : ''
+}
+def gameVersionMajor = (versionField('VERSION_MAJOR') ?: '0') as int
+def gameVersionMinor = (versionField('VERSION_MINOR') ?: '0') as int
+def gameVersionRevision = (versionField('VERSION_REVISION') ?: '0') as int
+def gameVersionName = "${gameVersionMajor}.${gameVersionMinor}.${gameVersionRevision}"
+
+// Android-only revision on top of the game version, bumped for Android-specific releases
+// (-PandroidRevision=N, or ANDROID_REVISION in CI). It keeps versionCode increasing.
+def androidRevision = ((project.findProperty('androidRevision') ?: System.getenv('ANDROID_REVISION') ?: '0') as String) as int
+
+// "owner/name" of the GitHub repository whose releases the launcher checks for updates.
+// Defaults to the repository building the APK on GitHub Actions; empty disables the check.
+def updateRepository = (project.findProperty('updateRepository') ?: System.getenv('GITHUB_REPOSITORY') ?: '') as String
+
+// SDL's Java glue must match the native SDL build, so it is compiled straight from the
+// submodule instead of being copied into this project.
+def sdlJavaDir = file('../../thirdparty/SDL/android-project/app/src/main/java')
+if (!new File(sdlJavaDir, 'org/libsdl/app/SDLActivity.java').isFile()) {
+    throw new GradleException("SDL's Java sources were not found in ${sdlJavaDir}. Run: git submodule update --init thirdparty/SDL")
+}
+
+android {
+    namespace "org.shadowrecomp.android"
+    compileSdkVersion 35
+    ndkVersion "29.0.14206865"
+
+    defaultConfig {
+        // Renaming this orphans the data stored under Android/data/<old id>.
+        applicationId "org.shadowrecomp.android"
+        minSdkVersion 29
+        targetSdkVersion 34
+        versionCode gameVersionMajor * 1000000 + gameVersionMinor * 10000 + gameVersionRevision * 100 + androidRevision
+        versionName androidRevision > 0 ? "${gameVersionName}-android.${androidRevision}" : gameVersionName
+        resValue "string", "update_repository", updateRepository
+        ndk {
+            abiFilters 'arm64-v8a'
+        }
+    }
+
+    sourceSets {
+        main {
+            java.srcDirs += sdlJavaDir
+        }
+    }
+
+    // CI provides the release keystore through environment variables (see
+    // .github/workflows/build-android.yml); without them release builds stay unsigned.
+    if (System.getenv("ANDROID_KEYSTORE_FILE") != null) {
+        signingConfigs {
+            ci {
+                storeFile file(System.getenv("ANDROID_KEYSTORE_FILE"))
+                storePassword System.getenv("ANDROID_KEYSTORE_PASSWORD")
+                keyAlias System.getenv("ANDROID_KEY_ALIAS")
+                keyPassword System.getenv("ANDROID_KEY_PASSWORD")
+            }
+        }
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+            proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
+            if (System.getenv("ANDROID_KEYSTORE_FILE") != null) {
+                signingConfig signingConfigs.ci
+            }
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_11
+        targetCompatibility JavaVersion.VERSION_11
+    }
+
+    // libmain.so is built by the project's own CMake pipeline (see docs/ANDROID.md) and
+    // copied into src/main/jniLibs/arm64-v8a/ together with the libadrenotools hook
+    // libraries; Gradle does not build native code.
+    //
+    // The native libraries are extracted to disk at install time: libadrenotools needs the
+    // hook libraries as real files in ApplicationInfo.nativeLibraryDir to load a custom
+    // Vulkan driver.
+    packagingOptions {
+        jniLibs {
+            useLegacyPackaging true
+        }
+    }
+
+    lint {
+        abortOnError false
+    }
+}
+
+// Fail early, with a useful message, instead of producing an APK that cannot start.
+tasks.configureEach { task ->
+    if (task.name.startsWith('merge') && task.name.endsWith('JniLibFolders')) {
+        task.doFirst {
+            def library = file('src/main/jniLibs/arm64-v8a/libmain.so')
+            if (!library.isFile()) {
+                throw new GradleException("${library} is missing. Build the native game first (see docs/ANDROID.md).")
+            }
+        }
+    }
+}

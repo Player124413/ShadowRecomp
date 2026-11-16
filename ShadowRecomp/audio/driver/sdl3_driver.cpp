@@ -1239,7 +1239,34 @@ SHTHR_SOUNDDEVICE_Impl::SHTHR_SOUNDDEVICE_Impl()
 
 	SDL_SetHint(SDL_HINT_AUDIO_CATEGORY, "playback");
 	SDL_SetAppMetadataProperty(SDL_PROP_APP_METADATA_NAME_STRING, "Shadow Recompiled");
+#ifdef __ANDROID__
+	// The audio preset chosen in the launcher. Phones differ too much for one buffer size:
+	// "Compatibility" trades latency for a larger buffer and avoids AAudio's low latency
+	// path (which sounds wrong on some devices), "LowLatency" does the opposite.
+	const char* sampleFrames = "512";
+	const char* lowLatency = "1";
+
+	switch (Config::AndroidAudioPreset.Value)
+	{
+	case EAndroidAudioPreset::Compatibility:
+		sampleFrames = "1024";
+		lowLatency = "0";
+		break;
+
+	case EAndroidAudioPreset::LowLatency:
+		sampleFrames = "256";
+		break;
+
+	case EAndroidAudioPreset::Default:
+		break;
+	}
+
+	SDL_SetHint(SDL_HINT_AUDIO_DEVICE_SAMPLE_FRAMES, sampleFrames);
+	SDL_SetHint(SDL_HINT_ANDROID_LOW_LATENCY_AUDIO, lowLatency);
+	LOGFN("Audio preset: {} sample frames, low latency {}", sampleFrames, lowLatency);
+#else
 	SDL_SetHint(SDL_HINT_AUDIO_DEVICE_SAMPLE_FRAMES, "512"); // necessary for weapon SFX timing (SDL default is 1024)
+#endif
 
 	if (!SDL_InitSubSystem(SDL_INIT_AUDIO))
 	{

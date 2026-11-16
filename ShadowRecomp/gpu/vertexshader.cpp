@@ -447,6 +447,15 @@ GuestShader* FindShaderCacheEntryNew()
 
 const uint8_t* CreateRecompiledShader(size_t handle, size_t* outSize)
 {
+#ifdef SHADOW_RECOMP_NO_RUNTIME_SHADER_COMPILER
+	// Translating a shader at runtime needs the DirectX Shader Compiler, which this build
+	// does not have. The caller falls back when no bytecode is returned.
+	(void)handle;
+	if (outSize != nullptr)
+		*outSize = 0;
+
+	return nullptr;
+#else
 	auto pTokens = GetVertexShaderSlotPtr(g_Xbox_VertexShader_FunctionSlots_StartAddress);
 	assert(pTokens);
 	// Create a vertex shader from the tokens
@@ -460,7 +469,7 @@ const uint8_t* CreateRecompiledShader(size_t handle, size_t* outSize)
 
 	auto pShaderOut = XSR_CreateRecompiledVertexShader(handle, pTokens, &shaderSize, outSize, isvulkan, exportHLSLFile);
 	return pShaderOut;
-
+#endif
 }
 
 void SelectVertexShader(DWORD Handle, DWORD Address)

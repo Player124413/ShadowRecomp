@@ -8,6 +8,10 @@
 #include <sdl_events.h>
 #include <os/logger.h>
 
+#ifdef __ANDROID__
+#include <ui/touch_controls.h>
+#endif
+
 input::EInputDevice input::g_inputDevice;
 input::EInputDevice input::g_inputDeviceController;
 input::EInputDeviceExplicit input::g_inputDeviceExplicit;
@@ -296,6 +300,37 @@ static void MapPadButtons(const PadSnapshot& snapshot, uint32_t playerIndex, XIN
 	pad.bAnalogButtons[Buttons_LT] = getValue(EXboxButton::LeftTrigger);
 	pad.bAnalogButtons[Buttons_RT] = getValue(EXboxButton::RightTrigger);
 }
+
+#ifdef __ANDROID__
+static void MergeTouchControls(XINPUT_GAMEPAD_OG& pad)
+{
+	TouchControls::PadState touch;
+	if (!TouchControls::GetPadState(touch))
+		return;
+
+	pad.wButtons |= touch.buttons;
+
+	for (size_t i = 0; i < std::size(pad.bAnalogButtons); i++)
+		pad.bAnalogButtons[i] = std::max(pad.bAnalogButtons[i], touch.analogButtons[i]);
+
+	// A stick that is being touched wins over the physical one.
+	if (touch.thumbLX != 0 || touch.thumbLY != 0)
+	{
+		pad.sThumbLX = touch.thumbLX;
+		pad.sThumbLY = touch.thumbLY;
+	}
+
+	if (touch.thumbRX != 0 || touch.thumbRY != 0)
+	{
+		pad.sThumbRX = touch.thumbRX;
+		pad.sThumbRY = touch.thumbRY;
+
+		// Same meaning as for a physical stick, see MapPadAxis().
+		if (Config::HorizontalCamera1P == ECameraRotationMode::Reverse)
+			pad.sThumbRX = (int16_t)std::clamp(-(int32_t)pad.sThumbRX, (int32_t)-32768, (int32_t)INT16_MAX);
+	}
+}
+#endif
 
 std::array<Controller, 4> g_controllers;
 Controller* g_activeController;
@@ -705,6 +740,13 @@ bool Input_OnSDLEvent(void*, SDL_Event* event)
 	case SDL_EVENT_MOUSE_BUTTON_DOWN:
 	case SDL_EVENT_MOUSE_BUTTON_UP:
 	{
+#ifdef __ANDROID__
+		// SDL mirrors every finger as a mouse so that ImGui can be tapped. Those touches
+		// drive the on-screen gamepad; they do not mean the player switched to a mouse.
+		if ((event->type == SDL_EVENT_MOUSE_MOTION ? event->motion.which : event->button.which) == SDL_TOUCH_MOUSEID)
+			break;
+#endif
+
 		if (!GameWindow::IsFullscreen() || GameWindow::s_isFullscreenCursorVisible)
 			SDL_ShowCursor();
 
@@ -820,6 +862,12 @@ uint32_t input::GetState(uint32_t dwUserIndex, XINPUT_STATE* pState)
 			MapPadAxis(snapshot, dwUserIndex - 1, pState->Gamepad);
 			hasController = true;
 		}
+
+#ifdef __ANDROID__
+		// The on-screen gamepad always plays as player 1, on top of a physical controller.
+		if (dwUserIndex == 1)
+			MergeTouchControls(pState->Gamepad);
+#endif
 
 		if (dwUserIndex == g_keyboardPort)
 		{

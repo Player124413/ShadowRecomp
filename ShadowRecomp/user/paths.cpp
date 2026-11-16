@@ -11,8 +11,11 @@ bool CheckPortable()
 
 std::filesystem::path BuildUserPath()
 {
+#ifndef __ANDROID__
+    // Not on Android: the launcher edits config.toml at one fixed location (see below).
     if (CheckPortable())
         return g_executableRoot;
+#endif
 
     std::filesystem::path userPath;
 
@@ -22,6 +25,11 @@ std::filesystem::path BuildUserPath()
         userPath = std::filesystem::path{ knownPath } / USER_DIRECTORY;
 
     CoTaskMemFree(knownPath);
+#elif defined(__ANDROID__)
+    // An app has no home directory. Settings and saves live next to the game files, in
+    // the storage root chosen in the launcher (which patches config.toml at this path).
+    if (os::android::HasDataRoot())
+        userPath = os::android::GetDataRoot() / ".config" / USER_DIRECTORY;
 #elif defined(__linux__)
     const char* homeDir = getenv("HOME");
     if (homeDir == nullptr)

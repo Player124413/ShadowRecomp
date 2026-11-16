@@ -2083,7 +2083,12 @@ static void DrawOptions(X86Context* ctx, ImVec2 minClipRect, ImVec2 maxClipRect,
 
 		auto monitorMax = GameWindow::CanSpanDisplays() ? displayCount : displayCount - 1;
 		DrawOption(ctx, rowCount++, &Config::Monitor, canChangeMonitor, min, max, monitorReason, 0, 0, std::max(monitorMax, 0), false);
+#ifdef __ANDROID__
+		// The game always covers the screen on Android.
+		DrawOption(ctx, rowCount++, &Config::Fullscreen, false, min, max, &Localise("Options_Desc_OSNotSupported"));
+#else
 		DrawOption(ctx, rowCount++, &Config::Fullscreen, true, min, max, devReason);
+#endif
 		DrawOption(ctx, rowCount++, &Config::AspectRatio, true, min, max, devReason);
 		DrawOption(ctx, rowCount++, &Config::WindowSize, canChangeResolution, min, max, &Localise("Options_Desc_NotAvailableFullscreen"), 0, 0, (int)GameWindow::GetDisplayModes().size() - 1, false);
 		DrawOption(ctx, rowCount++, &Config::ResolutionScale, true, min, max, nullptr, 0.25f, 1.0f, 2.0f);

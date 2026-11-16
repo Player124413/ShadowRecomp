@@ -2,6 +2,11 @@
 
 #include <locale/locale.h>
 
+#ifdef __ANDROID__
+// EAndroidVulkanDriver, EAndroidRenderMode, EAndroidAudioPreset, ETouchControls, ETouchCamera.
+#include <os/android/android_settings.h>
+#endif
+
 
 static constexpr int32_t FPS_MIN = 15;
 static constexpr int32_t FPS_MAX = 240;

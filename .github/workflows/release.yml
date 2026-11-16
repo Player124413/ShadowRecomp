@@ -59,3 +59,34 @@ jobs:
 
       - name: Upload
         run: gh release upload "${TAG}" ./assets/* --clobber --repo "${{ github.repository }}"
+
+  # Android is built and uploaded on its own, so that it can never hold back the
+  # desktop assets above.
+  build-android:
+    needs: version
+    uses: ./.github/workflows/build-android.yml
+    secrets: inherit
+  upload-android:
+    needs: [version, build-android]
+    runs-on: ubuntu-26.04
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      TAG: ${{ github.event.release.tag_name }}
+      VERSION: ${{ needs.version.outputs.version }}
+    steps:
+      - name: Download Artifact
+        uses: actions/download-artifact@v7
+        with:
+          name: ShadowRecomp-Android-arm64-v8a-android-release
+          path: ./artifacts
+
+      - name: Prep
+        run: |
+          mkdir ./assets
+          cp ./artifacts/*.apk ./assets/ShadowRecomp-Android-arm64-${VERSION}.apk
+          ls -l ./assets
+
+      - name: Upload
+        run: gh release upload "${TAG}" ./assets/* --clobber --repo "${{ github.repository }}"

@@ -354,6 +354,50 @@ CONFIG_DEFINE_ENUM_TEMPLATE(ECutsceneFramerate)
     { "Unlocked", ECutsceneFramerate::Unlocked }
 };
 
+#ifdef __ANDROID__
+// These names are also written by the Android launcher, which edits config.toml directly:
+// keep them in sync with the *_VALUES arrays in android-apk/.../LauncherActivity.java.
+
+CONFIG_DEFINE_ENUM_TEMPLATE(EAndroidVulkanDriver)
+{
+    { "Auto",             EAndroidVulkanDriver::Auto },
+    { "System",           EAndroidVulkanDriver::System },
+    { "Bundled",          EAndroidVulkanDriver::Bundled },
+    { "Vauzi710",         EAndroidVulkanDriver::Vauzi710 },
+    { "ExperimentalA725", EAndroidVulkanDriver::ExperimentalA725 },
+    { "Adreno8xx",        EAndroidVulkanDriver::Adreno8xx },
+    { "Imported",         EAndroidVulkanDriver::Imported }
+};
+
+CONFIG_DEFINE_ENUM_TEMPLATE(EAndroidRenderMode)
+{
+    { "Auto",   EAndroidRenderMode::Auto },
+    { "GMEM",   EAndroidRenderMode::GMEM },
+    { "Sysmem", EAndroidRenderMode::Sysmem }
+};
+
+CONFIG_DEFINE_ENUM_TEMPLATE(EAndroidAudioPreset)
+{
+    { "Default",       EAndroidAudioPreset::Default },
+    { "Compatibility", EAndroidAudioPreset::Compatibility },
+    { "LowLatency",    EAndroidAudioPreset::LowLatency }
+};
+
+CONFIG_DEFINE_ENUM_TEMPLATE(ETouchControls)
+{
+    { "Auto", ETouchControls::Auto },
+    { "On",   ETouchControls::On },
+    { "Off",  ETouchControls::Off }
+};
+
+CONFIG_DEFINE_ENUM_TEMPLATE(ETouchCamera)
+{
+    { "Swipe", ETouchCamera::Swipe },
+    { "Stick", ETouchCamera::Stick },
+    { "Off",   ETouchCamera::Off }
+};
+#endif
+
 
 #undef  CONFIG_DEFINE
 #define CONFIG_DEFINE(section, type, name, defaultValue, requiresRestart) \
