@@ -258,6 +258,13 @@ if seven_zip:
     subprocess.run([seven_zip, 'a', '-bd', '-y', '-tzip', '-psesame', str(path), str(ROOT / 'bare.iso')], check=True, stdout=subprocess.DEVNULL)
     check(refused('password', path), 'a .zip with a password')
 
+    # Windows packs files over 2 GB with Deflate64, which Python cannot unpack: 7z has to.
+    path = ROOT / 'deflate64.zip'
+    subprocess.run([seven_zip, 'a', '-bd', '-y', '-tzip', '-mm=Deflate64', str(path), str(ROOT / 'bare.iso')], check=True, stdout=subprocess.DEVNULL)
+    with zipfile.ZipFile(path) as archive:
+        check(archive.infolist()[0].compress_type == 9, 'the test archive is packed with Deflate64')
+    check(fetched(path) == XBE, 'a .zip packed with Deflate64')
+
     path = ROOT / 'bare.iso.gz'
     subprocess.run([seven_zip, 'a', '-bd', '-y', '-tgzip', str(path), str(ROOT / 'bare.iso')], check=True, stdout=subprocess.DEVNULL)
     check(fetched(path) == XBE, 'a .gz with a disc image')

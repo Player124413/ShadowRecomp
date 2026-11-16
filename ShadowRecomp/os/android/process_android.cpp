@@ -61,5 +61,3 @@ void os::process::ShowConsole()
 {
     // Unsupported on Android.
 }
-
-#error TEMPORARY: deliberate failure to rehearse the failure report of the workflow

@@ -146,6 +146,8 @@ jobs:
                 sleep 0.2
               done
               python3 ./tools/android/fetch-xbe.py "http://127.0.0.1:8731/game.7z" --no-verify
+              # TEMPORARY-REHEARSAL: let the real recompiler loose on the placeholder
+              echo "GAME_SOURCE=link" >> "${GITHUB_ENV}"
               ;;
           esac
 
@@ -258,31 +260,6 @@ jobs:
           path: ./ShadowRecomp-Android-${{ matrix.arch.name }}-${{ env.CMAKE_PRESET }}${{ env.ARTIFACT_SUFFIX }}.apk
           if-no-files-found: error
           retention-days: 3
-
-      # TEMPORARY-DIAGNOSTICS-BEGIN
-      - name: Diagnostics (temporary)
-        run: |-
-          note() { local t="$2"; t="${t//'%'/'%25'}"; t="${t//$'\r'/'%0D'}"; t="${t//$'\n'/'%0A'}"; echo "::notice title=$1::${t:0:4000}"; }
-          apk=./android-apk/app/build/outputs/apk/debug/app-debug.apk
-          bt="${ANDROID_HOME}/build-tools/34.0.0"
-          llvm="${ANDROID_NDK_HOME}/toolchains/llvm/prebuilt/linux-x86_64/bin"
-          lib=./android-apk/app/src/main/jniLibs/arm64-v8a/libmain.so
-          full="./out/build/${CMAKE_PRESET}/ShadowRecomp/libmain.so"
-          note "apk files" "$(unzip -l "${apk}" | awk '{print $1, $4}' | grep -v -E ' (res/|META-INF)' | sort -k2 | tail -n 60)"
-          note "badging" "$("${bt}/aapt2" dump badging "${apk}" 2>&1 | head -n 16)"
-          note "signature" "$("${bt}/apksigner" verify --verbose --print-certs "${apk}" 2>&1 | head -n 12)"
-          note "libs" "$(ls -la "${full}" ./android-apk/app/src/main/jniLibs/arm64-v8a/ 2>&1; "${llvm}/llvm-readelf" -d "${lib}" | grep -E 'NEEDED|SONAME|FLAGS'; "${llvm}/llvm-readelf" -lW "${lib}" | grep LOAD)"
-          note "symbols" "$("${llvm}/llvm-nm" -D --defined-only "${lib}" | grep -E ' (SDL_main|JNI_OnLoad|ShadowRecomp_AndroidVulkanDlopen)$'; echo "jni: $("${llvm}/llvm-nm" -D --defined-only "${lib}" | grep -c Java_org_libsdl_app)"; echo "debug sections, unstripped: $("${llvm}/llvm-readelf" -SW "${full}" | grep -c debug)"; echo "debug/symtab sections, stripped: $("${llvm}/llvm-readelf" -SW "${lib}" | grep -c -E 'debug|symtab')"; "${llvm}/llvm-readelf" -SW "${full}" | grep -E 'debug_info|\.text|\.data|symtab' | awk '{print $2, $6}')"
-          note "build" "$(echo "g0: $(grep -c -- ' -g0 ' "./out/build/${CMAKE_PRESET}/compile_commands.json")  -g: $(grep -c -- ' -g ' "./out/build/${CMAKE_PRESET}/compile_commands.json")  lto: $(grep -c -- '-flto' "./out/build/${CMAKE_PRESET}/compile_commands.json")"; echo "warnings: $(grep -c 'warning:' "${RUNNER_TEMP}/logs/build.log")"; grep 'warning:' "${RUNNER_TEMP}/logs/build.log" | sed 's/.*\[-W/[-W/' | sort | uniq -c | sort -rn | head -n 12; ccache -s 2>&1 | head -n 14; tail -n 3 "${RUNNER_TEMP}/logs/build.log" | cut -c1-200)"
-          note "gradle" "$(grep -E 'warning|Warning|WARNING|BUILD|strip|Unable|deprecat' "${RUNNER_TEMP}/logs/gradle.log" | head -n 30 | cut -c1-250)"
-          note "tests" "$(grep -E 'Test +#|tests passed|Java|javac|skipped' "${RUNNER_TEMP}/logs/tests.log" | head -n 30 | cut -c1-200)"
-          note "configure" "$(grep -E 'XboxRecomp2|stub-recompiler|NDK|compiler identification|Warning|IPO|file_to_c|dxc|Detected' "${RUNNER_TEMP}/logs/configure.log" | head -n 40 | cut -c1-220)"
-
-      - name: Failure report rehearsal (temporary)
-        run: |-
-          rm -f "${RUNNER_TEMP}/logs/"*.ok
-          ./tools/android/ci-report.sh "${RUNNER_TEMP}/logs" || true
-      # TEMPORARY-DIAGNOSTICS-END
 
       # The logs of the build are long. When it fails, the lines that matter are put on
       # the summary page of the run.
