@@ -166,6 +166,7 @@ set(SHADOW_RECOMP_GPU_CXX_SOURCES
 if (ANDROID)
     list(APPEND SHADOW_RECOMP_GPU_CXX_SOURCES
         "gpu/android_video.cpp"
+        "gpu/bc_decode.cpp"
         "gpu/spirv_int64_lowering.cpp"
         "gpu/vulkan_int64_lowering.cpp"
         "gpu/vulkan_pipeline_cache.cpp"
@@ -301,7 +302,11 @@ set(SHADOW_RECOMP_THIRDPARTY_INCLUDES
 )
 
 if (ANDROID)
-    list(APPEND SHADOW_RECOMP_THIRDPARTY_INCLUDES "${SHADOW_RECOMP_THIRDPARTY_ROOT}/miniz")
+    list(APPEND SHADOW_RECOMP_THIRDPARTY_INCLUDES
+        "${SHADOW_RECOMP_THIRDPARTY_ROOT}/miniz"
+        # Unpacks block-compressed textures for GPUs that cannot sample them (gpu/bc_decode.cpp).
+        "${SHADOW_RECOMP_THIRDPARTY_ROOT}/bcdec"
+    )
 endif()
 
 set_source_files_properties(${SHADOW_RECOMP_THIRDPARTY_SOURCES} PROPERTIES SKIP_PRECOMPILE_HEADERS ON)

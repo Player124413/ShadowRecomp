@@ -337,13 +337,11 @@ static void CompileQueuedPipeline(QueuedPipeline& queued)
 #ifdef __ANDROID__
 // Pipelines the driver refused to create. Its own reason goes to stderr every time; which
 // pipelines they were is added for the first few, the rest are counted.
-static std::atomic<uint32_t> g_refusedPipelineCount{ 0 };
-
 static void ReportRefusedPipeline(const PipelineState& pipelineState)
 {
 	constexpr uint32_t LISTED = 8;
 
-	const uint32_t count = ++g_refusedPipelineCount;
+	const uint32_t count = AndroidVideo::CountRefusedPipeline();
 	if (count > LISTED)
 		return;
 
@@ -371,7 +369,7 @@ static void OnQueuedPipelinesCompiled(uint32_t count, double milliseconds)
 	LOGFN("PipelineCache: Background threads compiled {} pipelines in {:.2f} ms", count, milliseconds);
 
 #ifdef __ANDROID__
-	if (const uint32_t refused = g_refusedPipelineCount.load())
+	if (const uint32_t refused = AndroidVideo::GetRefusedPipelineCount())
 		LOGFN_ERROR("PipelineCache: The graphics driver has refused {} pipelines so far.", refused);
 
 	AndroidVideo::OnCachedPipelinesCreated();

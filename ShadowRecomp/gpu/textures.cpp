@@ -8,6 +8,10 @@
 #include "render_commands.h"
 #include "vertexshader.h"
 
+#ifdef __ANDROID__
+#include "android_video.h"
+#endif
+
 // This page handle textures process, such as palette conversion (originally used on Xbox),
 // copy to the gpu, the custom texs GUI made for Recomp etc.
 
@@ -62,6 +66,15 @@ static bool LoadTexture(GuestTexture& texture, const uint8_t* data, size_t dataS
 		desc.arraySize = arraySize;
 		desc.format = ConvertDXGIFormat(ddsDesc.format);
 		desc.flags = ddsDesc.type == ddspp::TextureType::Cubemap ? RenderTextureFlag::CUBE : RenderTextureFlag::NONE;
+
+		// Bytes of one pixel the data is unpacked to on a GPU that cannot sample the
+		// block-compressed format of the file; 0 where the data is uploaded as it is.
+		uint32_t unpackedPixelSize = 0;
+#ifdef __ANDROID__
+		BcDecode::EFormat unpackFrom;
+		desc.format = AndroidVideo::HostTextureFormat(desc.format, unpackFrom);
+		unpackedPixelSize = BcDecode::PixelSize(unpackFrom);
+#endif
 
 		if (forceCubeMap)
 		{
@@ -123,8 +136,16 @@ static bool LoadTexture(GuestTexture& texture, const uint8_t* data, size_t dataS
 				slice.dstRowPitch = (slice.srcRowPitch + PITCH_ALIGNMENT - 1) & ~(PITCH_ALIGNMENT - 1);
 				slice.rowCount = (slice.height + ddsDesc.blockHeight - 1) / ddsDesc.blockHeight;
 
+				// Unpacked, a slice is rows of pixels rather than rows of blocks.
+				uint32_t dstRowCount = slice.rowCount;
+				if (unpackedPixelSize != 0)
+				{
+					slice.dstRowPitch = (slice.width * unpackedPixelSize + PITCH_ALIGNMENT - 1) & ~(PITCH_ALIGNMENT - 1);
+					dstRowCount = slice.height;
+				}
+
 				curSrcOffset += slice.srcRowPitch * slice.rowCount * slice.depth;
-				curDstOffset += (slice.dstRowPitch * slice.rowCount * slice.depth + PLACEMENT_ALIGNMENT - 1) & ~(PLACEMENT_ALIGNMENT - 1);
+				curDstOffset += (slice.dstRowPitch * dstRowCount * slice.depth + PLACEMENT_ALIGNMENT - 1) & ~(PLACEMENT_ALIGNMENT - 1);
 			}
 		}
 
@@ -135,6 +156,19 @@ static bool LoadTexture(GuestTexture& texture, const uint8_t* data, size_t dataS
 		{
 			const uint8_t* srcData = data + ddsDesc.headerSize + slice.srcOffset;
 			uint8_t* dstData = mappedMemory + slice.dstOffset;
+
+#ifdef __ANDROID__
+			if (unpackedPixelSize != 0)
+			{
+				for (uint32_t z = 0; z < slice.depth; z++)
+				{
+					BcDecode::Decode(unpackFrom, srcData + size_t(z) * slice.srcRowPitch * slice.rowCount, slice.srcRowPitch,
+						slice.width, slice.height, dstData + size_t(z) * slice.dstRowPitch * slice.height, slice.dstRowPitch);
+				}
+
+				continue;
+			}
+#endif
 
 			if (slice.srcRowPitch == slice.dstRowPitch)
 			{
@@ -159,9 +193,16 @@ static bool LoadTexture(GuestTexture& texture, const uint8_t* data, size_t dataS
 
 				auto copyTextureRegion = [&](Slice& slice, uint32_t subresourceIndex)
 					{
+						// Plume wants the width of a row in pixels.
+						uint32_t rowWidth = (slice.dstRowPitch * 8) / ddsDesc.bitsPerPixelOrBlock * ddsDesc.blockWidth;
+#ifdef __ANDROID__
+						if (unpackedPixelSize != 0)
+							rowWidth = slice.dstRowPitch / unpackedPixelSize;
+#endif
+
 						commandList->copyTextureRegion(
 							RenderTextureCopyLocation::Subresource(texture.texture, subresourceIndex % ddsDesc.numMips, subresourceIndex / ddsDesc.numMips),
-							RenderTextureCopyLocation::PlacedFootprint(uploadBuffer.get(), desc.format, slice.width, slice.height, slice.depth, (slice.dstRowPitch * 8) / ddsDesc.bitsPerPixelOrBlock * ddsDesc.blockWidth, slice.dstOffset));
+							RenderTextureCopyLocation::PlacedFootprint(uploadBuffer.get(), desc.format, slice.width, slice.height, slice.depth, rowWidth, slice.dstOffset));
 					};
 
 				for (size_t i = 0; i < slices.size(); i++)
@@ -336,6 +377,18 @@ void CopyTextureToGPU(GuestTexture* tex)
 		blockSize = format == X_D3DFMT_DXT1 ? 8 : 16;
 	}
 
+	// Whether the blocks are unpacked into the plain texture a GPU without block-compressed
+	// textures was given instead (see CreateTexture), and what they are unpacked from.
+	bool bUnpack = false;
+#ifdef __ANDROID__
+	BcDecode::EFormat unpackFrom = BcDecode::EFormat::None;
+	if (bCompressed)
+	{
+		AndroidVideo::HostTextureFormat(ConvertFormat(format), unpackFrom);
+		bUnpack = unpackFrom != BcDecode::EFormat::None && RenderFormatBlockWidth(tex->format) <= 1;
+	}
+#endif
+
 	for (int32_t face = D3DCUBEMAP_FACE_POSITIVE_X; face <= last_face; face++)
 	{
 		for (uint32_t mipmap_level = 0; mipmap_level < dwMipMapLevels; mipmap_level++)
@@ -381,10 +434,18 @@ void CopyTextureToGPU(GuestTexture* tex)
 				rawDstRowPitch = blockCols * blockSize;
 			}
 
+			// Unpacked, a slice is rows of RGBA pixels rather than rows of blocks.
+			uint32_t dstRowCount = slice.rowCount;
+			if (bUnpack)
+			{
+				rawDstRowPitch = slice.width * 4;
+				dstRowCount = slice.height;
+			}
+
 			slice.dstRowPitch = (rawDstRowPitch + PITCH_ALIGNMENT - 1) & ~(PITCH_ALIGNMENT - 1);
 			slice.dstOffset = curDstOffset;
 
-			uint32_t alignedSliceSize = (slice.dstRowPitch * slice.rowCount * slice.depth + PLACEMENT_ALIGNMENT - 1) & ~(PLACEMENT_ALIGNMENT - 1);
+			uint32_t alignedSliceSize = (slice.dstRowPitch * dstRowCount * slice.depth + PLACEMENT_ALIGNMENT - 1) & ~(PLACEMENT_ALIGNMENT - 1);
 
 			curSrcOffset += mipSlicePitch;
 			curDstOffset += alignedSliceSize;
@@ -429,6 +490,16 @@ void CopyTextureToGPU(GuestTexture* tex)
 				srcBpp,
 				dstData, slice.dstRowPitch, dstSlicePitch);
 		}
+#ifdef __ANDROID__
+		else if (bUnpack)
+		{
+			for (uint32_t z = 0; z < slice.depth; z++)
+			{
+				BcDecode::Decode(unpackFrom, srcData + size_t(z) * slice.srcRowPitch * slice.rowCount, slice.srcRowPitch,
+					slice.width, slice.height, dstData + size_t(z) * slice.dstRowPitch * slice.height, slice.dstRowPitch);
+			}
+		}
+#endif
 		else if (bCompressed)
 		{
 			memcpy(dstData, srcData, slice.srcRowPitch * slice.rowCount * slice.depth);

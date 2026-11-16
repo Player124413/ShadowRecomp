@@ -143,6 +143,7 @@ A few settings exist for narrowing down a problem with any of this. They are not
 | `BackgroundPipelineCompilation = false` | All pipelines are created before the game starts, as the desktop versions do: a longer black screen at launch, no stutter after it |
 | `PipelineDiskCache = false`             | Nothing the driver compiles is kept between launches |
 | `ShadersWithoutInt64 = true`            | The shaders are rewritten to do without 64-bit integers also on a driver that has them. On a device where the game works, this tells whether the rewrite or a driver is at fault when a device without them shows a wrong picture |
+| `DecodeCompressedTextures = true`       | DXT/BC textures are unpacked when they are loaded also on a GPU that can sample them, as on one that cannot (see [Mods](#mods)) |
 
 ### Controls
 
@@ -162,9 +163,10 @@ lower in the list wins. **Install a mod (.zip / folder)** copies a mod from a ZI
 or a folder into `mods/`. Changes apply the next time the game starts.
 
 > [!NOTE]
-> Mods that replace textures with DXT/BC compressed ones may not display correctly on
-> GPUs without BC texture support, which includes most Mali and PowerVR devices. The
-> game's own textures are not affected.
+> Most phone GPUs other than Adreno (Mali, PowerVR, Xclipse) cannot sample DXT/BC
+> compressed textures, which mods often use. There such a texture is unpacked when it is
+> loaded and takes four to eight times the memory; `log.txt` says so in a line that starts
+> with `Textures:`. The game's own textures are not compressed this way.
 
 ### Audio
 
@@ -181,6 +183,18 @@ app, which is why builds from different sources cannot update one another.
 
 Every run writes `log.txt`, and keeps the previous one as `log_prev.txt`. **Open logs**
 shows them; on a computer they are in `Android/data/org.shadowrecomp.android/files/`.
+
+A report of a wrong picture or a low frame rate needs the whole file. Besides what went
+wrong it holds what such a report cannot do without:
+
+- the GPU, its driver and what the driver can do (the lines that start with `Vulkan`);
+- once a minute, a line that starts with `[render]`: frames per second, draws per frame,
+  draws that were left out because the driver had refused their pipeline, and changes of
+  frame buffer per frame (each one is costly on a phone GPU);
+- twice, 20 seconds and 2 minutes into the game, one frame draw by draw (the lines that
+  start with `[frame]`): what was drawn, with which shaders and states, into what and
+  from which texture. So play for at least two minutes, with the problem on screen,
+  before you copy the file.
 
 ## Building
 
@@ -327,7 +341,8 @@ answer with the build tree that the APK was made from:
 
 The Android-specific code (driver selection and startup recovery, driver import, the
 check of what a Vulkan driver must support, the rewrite of the shaders for drivers
-without 64-bit integers, the staged game installation, the on-screen controls, logging,
+without 64-bit integers, the unpacking of compressed textures for GPUs that cannot
+sample them, the staged game installation, the on-screen controls, logging,
 the pipeline cache kept on disk and the background compilation queue, and the launcher's
 handling of archives, disc images and storage copies) and the build tools in
 `tools/android` have tests that run on the build machine. They need neither the NDK nor

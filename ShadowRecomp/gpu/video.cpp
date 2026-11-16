@@ -355,6 +355,20 @@ static uint32_t g_psoCacheMisses = 0;
 static uint32_t g_psoCacheHitsSnapshot = 0;
 static uint32_t g_psoCacheMissesSnapshot = 0;
 
+#ifdef __ANDROID__
+// What the log is told about a frame once in a while (AndroidVideo::CountFrame): how many
+// draws were left out because the driver had refused their pipeline, and how often the
+// frame buffer changed. Every change ends a render pass, which on the tile-based GPUs of
+// phones means writing all its targets out and reading the next ones in.
+static uint32_t g_skippedDrawCount = 0;
+static uint32_t g_framebufferChangeCount = 0;
+
+// Whether the pipeline of the current state is one the driver created. plume hands out an
+// object for a pipeline the driver refused too; bound, it is a null handle to the driver,
+// which some drivers crash on and others answer by drawing with whatever was bound before.
+static bool g_pipelineUsable = true;
+#endif
+
 // --- Render-thread per-frame breakdown (cumulative; snapshot at frame end) ---
 static FrameAccumulator g_rtPsoWorkAccum;
 static FrameAccumulator g_rtFlushWorkAccum;
@@ -2387,6 +2401,22 @@ static void GetUpscaledSurfaceResolution(uint32_t widthOrigin, uint32_t heightOr
 	*heightOut = height;
 }
 
+#ifdef __ANDROID__
+// The depth buffer of the game is one of 640x480 on the Xbox, used with the back buffer
+// and with the 512x512 texture the scene is drawn into alike: the Xbox does not mind a
+// depth buffer that is smaller than what is drawn into, as long as nothing is drawn
+// outside it. Here it is created as 512x512, so that it covers that texture, which makes
+// it narrower than the back buffer. Vulkan wants every part of a frame buffer to cover
+// the frame buffer. Desktop drivers and Turnip draw regardless; a driver that goes by the
+// rules, as the tile-based ones of other phone GPUs have reason to, need not draw
+// anything into such a frame buffer. So this depth buffer is made to cover both.
+static void CoverBackBuffer(uint32_t* width, uint32_t* height)
+{
+	*width = std::max(*width, Video::s_viewportWidth);
+	*height = std::max(*height, Video::s_viewportHeight);
+}
+#endif
+
 // This is needed because uninitialized RT / depth can crash the game under specific windows version if (and only if) VS is installed.
 void DiscardInitRenderResource(RenderTexture* texture, const bool isRT)
 {
@@ -2422,6 +2452,12 @@ static void RecreateGuestSurfaceTexture(GuestBaseTexture* tex, bool isRT)
 	uint32_t newWidth, newHeight;
 
 	GetUpscaledSurfaceResolution(tex->g_width, tex->g_height, &newWidth, &newHeight);
+
+#ifdef __ANDROID__
+	if (tex->coversBackBuffer)
+		CoverBackBuffer(&newWidth, &newHeight);
+#endif
+
 	tex->textureHolder = g_device->createTexture(RenderTextureDesc::Texture2D(newWidth, newHeight, 1, tex->format, isRT ? RenderTextureFlag::RENDER_TARGET : RenderTextureFlag::DEPTH_TARGET));
 	tex->texture = tex->textureHolder.get();
 	tex->textureGeneration = NextGuestTextureGeneration();
@@ -2724,6 +2760,10 @@ bool Video::CreateHostDevice(const char* sdlVideoDriver, bool graphicsApiRetry)
 	g_capabilities = g_device->getCapabilities();
 
 #ifdef __ANDROID__
+	// What plume made of the driver, and of the driver's what the renderer has to adapt to.
+	if (!AndroidVideo::CheckCreatedDevice(g_device.get()))
+		return false;
+
 	// Mobile GPUs differ a lot in what they can sample; record it for bug reports.
 	AndroidVideo::LogDeviceSupport(g_device.get());
 #endif
@@ -4667,6 +4707,14 @@ GuestTexture* CreateTexture(uint32_t width, uint32_t height, uint32_t depth, uin
 	desc.arraySize = 1;
 	desc.format = ConvertFormat(format);
 
+#ifdef __ANDROID__
+	// A GPU without block-compressed textures gets a plain one, which CopyTextureToGPU()
+	// unpacks the data into.
+	{
+		BcDecode::EFormat decode;
+		desc.format = AndroidVideo::HostTextureFormat(desc.format, decode);
+	}
+#endif
 
 	if (desc.format == DepthStencilFormat && FormatIsDepthBuffer(format))
 		desc.flags = RenderTextureFlag::DEPTH_TARGET;
@@ -4767,7 +4815,7 @@ static GuestBuffer* CreateIndexBuffer(uint32_t IndexCount, X_D3DFORMAT format)
 }
 
 
-static GuestSurface* CreateSurface(uint32_t width, uint32_t height, X_D3DFORMAT format, bool formatSet = false)
+static GuestSurface* CreateSurface(uint32_t width, uint32_t height, X_D3DFORMAT format, bool formatSet = false, bool coversBackBuffer = false)
 {
 	std::lock_guard resizeLock(g_surfaceRTsMutex);
 	auto ogFormat = formatSet ? static_cast<plume::RenderFormat>(format) : ConvertFormat(format);
@@ -4777,6 +4825,12 @@ static GuestSurface* CreateSurface(uint32_t width, uint32_t height, X_D3DFORMAT 
 	uint32_t newWidth, newHeight;
 
 	GetUpscaledSurfaceResolution(width, height, &newWidth, &newHeight);
+
+#ifdef __ANDROID__
+	if (coversBackBuffer)
+		CoverBackBuffer(&newWidth, &newHeight);
+#endif
+
 	width = newWidth;
 	height = newHeight;
 
@@ -4804,6 +4858,7 @@ static GuestSurface* CreateSurface(uint32_t width, uint32_t height, X_D3DFORMAT 
 	surface->format = desc.format;
 	surface->guestFormat = format;
 	surface->sampleCount = desc.multisampling.sampleCount;
+	surface->coversBackBuffer = coversBackBuffer;
 
 	RenderTextureViewDesc viewDesc;
 	viewDesc.dimension = RenderTextureViewDimension::TEXTURE_2D;
@@ -5168,6 +5223,22 @@ static void CopyDynamicTextureToGPU(GuestTexture* tex)
 
 	if (bCompressed)
 		blockSize = format == X_D3DFMT_DXT1 ? 8 : 16;
+
+#ifdef __ANDROID__
+	// This path is the one of videos, which are not compressed. A compressed texture whose
+	// host texture is a plain one (see CreateTexture) has no data here that would fit it.
+	if (bCompressed && RenderFormatBlockWidth(tex->format) <= 1)
+	{
+		static bool s_warned = false;
+		if (!s_warned)
+		{
+			s_warned = true;
+			LOGN_WARNING("A block-compressed texture that the game writes to directly is not unpacked on this GPU and will not show.");
+		}
+
+		return;
+	}
+#endif
 
 	// Build slice descriptors 
 	for (int32_t face = D3DCUBEMAP_FACE_POSITIVE_X; face <= last_face; face++)
@@ -5634,7 +5705,12 @@ X86_OVERRIDE_FUNC(sub_3D5140)
 
 	if (X86_LOAD_U32(device + GuestDeviceAutoDepthOffset))
 	{
+#ifdef __ANDROID__
+		// The depth buffer drawn with into the back buffer too: see CoverBackBuffer().
+		g_defaultStencil = CreateSurface(512, 512, X_D3DFMT_LIN_D24S8, false, true);
+#else
 		g_defaultStencil = CreateSurface(512, 512, X_D3DFMT_LIN_D24S8);
+#endif
 		ReplaceDeviceSurface(device, GuestDeviceAutoDepthOffset, g_defaultStencil);
 	}
 }
@@ -5814,6 +5890,11 @@ static void SetFramebuffer(GuestSurface* renderTarget, GuestSurface* depthStenci
 				if (depthStencil != nullptr)
 					desc.depthAttachment = depthStencil->texture;
 
+#ifdef __ANDROID__
+				if (renderTarget != nullptr && depthStencil != nullptr)
+					AndroidVideo::CheckFramebufferSizes(renderTarget->width, renderTarget->height, depthStencil->width, depthStencil->height);
+#endif
+
 				framebuffer = { g_device->createFramebuffer(desc), textureGeneration };
 			}
 
@@ -5821,6 +5902,9 @@ static void SetFramebuffer(GuestSurface* renderTarget, GuestSurface* depthStenci
 			{
 				commandList->setFramebuffer(framebuffer.framebuffer.get());
 				g_framebuffer = framebuffer.framebuffer.get();
+#ifdef __ANDROID__
+				g_framebufferChangeCount++;
+#endif
 			}
 		}
 		else if (g_framebuffer != nullptr)
@@ -5844,6 +5928,18 @@ static void ProcClear(const RenderCommand& cmd)
 
 	bool canClearInOnePass = (g_renderTarget == nullptr) || (g_depthStencil == nullptr) ||
 		(g_renderTarget->width == g_depthStencil->width && g_renderTarget->height == g_depthStencil->height);
+
+#ifdef __ANDROID__
+	// A depth buffer that covers the colour target can be cleared along with it: what is
+	// cleared of it is the area of the colour target, and no clear of the Xbox reached
+	// beyond the viewport either. This saves two changes of frame buffer per clear, each
+	// of which makes the tile-based GPU of a phone write its targets out and read them in.
+	if (g_renderTarget != nullptr && g_depthStencil != nullptr &&
+		g_depthStencil->width >= g_renderTarget->width && g_depthStencil->height >= g_renderTarget->height)
+	{
+		canClearInOnePass = true;
+	}
+#endif
 
 	if (canClearInOnePass)
 	{
@@ -6217,7 +6313,14 @@ static void FlushRenderStateForRenderThread()
 
 	if (g_dirtyStates.pipelineState)
 	{
-		commandList->setPipeline(CreateGraphicsPipelineInRenderThread(g_pipelineState));
+		RenderPipeline* pipeline = CreateGraphicsPipelineInRenderThread(g_pipelineState);
+
+#ifdef __ANDROID__
+		// A refused pipeline is not bound, and the draws that need it are left out.
+		g_pipelineUsable = AndroidVideo::IsPipelineUsable(pipeline);
+		if (g_pipelineUsable)
+#endif
+			commandList->setPipeline(pipeline);
 
 		// D3D12 resets the depth bias values. Check if they need to be set again.
 		if (g_capabilities.dynamicDepthBias && !g_vulkan)
@@ -6732,6 +6835,58 @@ void DrawPrimitive(X_D3DPRIMITIVETYPE PrimitiveType, uint32_t StartVertex, uint3
 	}
 }
 
+#ifdef __ANDROID__
+// Twice in a run one frame is written to the log draw by draw (AndroidVideo::CountFrame):
+// what is drawn, with which shaders and states, into what and from which texture. A report
+// of a wrong picture on a GPU nobody here has says little without it.
+static void LogFrameStart()
+{
+	LOGFN("[frame] the next frame, draw by draw: window {}x{}, picture {}x{}, back buffer {}x{}, Video.ResolutionScale {:.2f}, aspect ratio setting {}.",
+		g_swapChain != nullptr ? g_swapChain->getWidth() : 0, g_swapChain != nullptr ? g_swapChain->getHeight() : 0,
+		Video::s_viewportWidth, Video::s_viewportHeight, g_backBuffer != nullptr ? g_backBuffer->width : 0, g_backBuffer != nullptr ? g_backBuffer->height : 0,
+		Config::ResolutionScale.Value, uint32_t(Config::AspectRatio.Value));
+}
+
+static void LogDrawForFrame(const char* kind, uint32_t count)
+{
+	if (!AndroidVideo::IsFrameLogged())
+		return;
+
+	const PipelineState& state = g_pipelineState;
+	const char* vertexShader = state.vertexShaderType == VertexShaderMode::FixedFunction ? "fixed function" :
+		state.vertexShaderType == VertexShaderMode::Passthrough ? "pass-through" : "of the game";
+
+	std::string target = "no colour target";
+	if (g_renderTarget != nullptr)
+		target = fmt::format("{} {}x{}", g_renderTarget == g_backBuffer ? "back buffer" : "texture", g_renderTarget->width, g_renderTarget->height);
+
+	std::string depth = "no depth buffer";
+	if (g_depthStencil != nullptr && (state.zEnable || state.stencilEnable))
+		depth = fmt::format("depth {}x{}", g_depthStencil->width, g_depthStencil->height);
+
+	std::string texture = "no texture";
+	if (const GuestTexture* bound = g_textures[0])
+	{
+		texture = fmt::format("texture 0 is #{} {}x{} format {}{}", bound->descriptorIndex, bound->width, bound->height, uint32_t(bound->format),
+			bound->isRenderTarget ? " (a render target)" : "");
+	}
+
+	const RenderViewport& viewport = g_renderviewport.vp;
+
+	AndroidVideo::LogDraw(fmt::format(
+		"{} of {}, topology {}{}; vertex shader {}, pixel shader {} (variants {:#x}/{:#x}); "
+		"depth test {} write {} function {}, blend {} {}/{}, cull {}, colour mask {:#x}, alpha test {} function {} reference {:.3f}; "
+		"{}, {}; game viewport {:.0f},{:.0f} {:.0f}x{:.0f} depth {:.2f}..{:.2f}; {} (index pushed {})",
+		kind, count, uint32_t(state.primitiveTopology), g_pipelineUsable ? "" : ", LEFT OUT: the driver refused its pipeline",
+		vertexShader, state.isFixedFunctionPS ? "fixed function" : "of the game", uint64_t(state.vertexShaderVariant), uint64_t(state.pixelShaderVariant),
+		state.zEnable ? "on" : "off", state.zWriteEnable ? "on" : "off", uint32_t(state.zFunc),
+		state.alphaBlendEnable ? "on" : "off", uint32_t(state.srcBlend), uint32_t(state.destBlend), uint32_t(state.cullMode), uint32_t(state.colorWriteEnable),
+		g_sharedConstants.alphaTestEnable != 0 ? "on" : "off", g_sharedConstants.alphaFunc, g_sharedConstants.alphaRef,
+		target, depth, viewport.x, viewport.y, viewport.width, viewport.height, viewport.minDepth, viewport.maxDepth,
+		texture, g_sharedConstants.texture2DIndices[0]));
+}
+#endif
+
 static void ProcDrawPrimitive(const RenderCommand& cmd)
 {
 	RtScopeTimer _handlerScope(g_rtDrawHandlerAccum);
@@ -6741,6 +6896,16 @@ static void ProcDrawPrimitive(const RenderCommand& cmd)
 	SetPrimitiveType(args.primitiveType);
 	isFixedForRenderThread = args.isFixed;
 	FlushRenderStateForRenderThread();
+
+#ifdef __ANDROID__
+	LogDrawForFrame("vertices", args.primitiveCount);
+
+	if (!g_pipelineUsable)
+	{
+		g_skippedDrawCount++;
+		return;
+	}
+#endif
 
 	uint32_t primitiveCount = args.primitiveCount;
 	auto& commandList = g_commandLists[g_frame];
@@ -6891,6 +7056,16 @@ static void ProcDrawIndexedPrimitive(const RenderCommand& cmd)
 	isFixedForRenderThread = args.isFixed;
 	FlushRenderStateForRenderThread();
 
+#ifdef __ANDROID__
+	LogDrawForFrame("indexed vertices", args.primCount);
+
+	if (!g_pipelineUsable)
+	{
+		g_skippedDrawCount++;
+		return;
+	}
+#endif
+
 	{
 		RtScopeTimer _drawScope(g_rtDrawCallAccum);
 		g_commandLists[g_frame]->drawIndexedInstanced(args.primCount, 1, args.startIndex, args.baseVertexIndex, 0);
@@ -6970,6 +7145,16 @@ static void ProcDrawPrimitiveUP(const RenderCommand& cmd)
 
 	isFixedForRenderThread = args.isFixed;
 	FlushRenderStateForRenderThread();
+
+#ifdef __ANDROID__
+	LogDrawForFrame("vertices handed over directly", args.primitiveCount);
+
+	if (!g_pipelineUsable)
+	{
+		g_skippedDrawCount++;
+		return;
+	}
+#endif
 
 	uint32_t primitiveCount = args.primitiveCount;
 
@@ -7377,6 +7562,10 @@ static std::thread g_renderThread([]
 					i += stagedCount - 1;
 				} break;
 				case RenderCommandType::EndFrame:
+#ifdef __ANDROID__
+					if (AndroidVideo::CountFrame(g_drawCallCount, std::exchange(g_skippedDrawCount, 0u), std::exchange(g_framebufferChangeCount, 0u)))
+						LogFrameStart();
+#endif
 					g_drawCallCountSnapshot = std::exchange(g_drawCallCount, 0);
 					g_stateChangeCountSnapshot = std::exchange(g_stateChangeCount, 0);
 					g_totalCommandCountSnapshot = std::exchange(g_totalCommandCount, 0);

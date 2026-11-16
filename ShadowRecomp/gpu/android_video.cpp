@@ -20,6 +20,7 @@
 
 #include <atomic>
 #include <cstring>
+#include <iterator>
 #include <mutex>
 #include <string>
 #include <vector>
@@ -287,11 +288,6 @@ namespace AndroidVideo
         report.descriptorBindingVariableDescriptorCount = indexing.descriptorBindingVariableDescriptorCount;
         report.bufferDeviceAddress = deviceAddress.bufferDeviceAddress;
 
-        // Not needed, but the first thing to look at when a driver refuses a pipeline.
-        LOGFN("Vulkan device \"{}\": depthClamp {}, shaderClipDistance {}, textureCompressionBC {}.", properties.deviceName,
-            features.features.depthClamp ? "yes" : "no", features.features.shaderClipDistance ? "yes" : "no",
-            features.features.textureCompressionBC ? "yes" : "no");
-
         return report;
     }
 
@@ -351,6 +347,378 @@ namespace AndroidVideo
     {
         // plume hands out a pipeline object whether or not the driver created the pipeline.
         return pipeline != nullptr && static_cast<const VulkanGraphicsPipeline*>(pipeline)->vk != VK_NULL_HANDLE;
+    }
+
+    static std::atomic<uint32_t> s_refusedPipelineCount{ 0 };
+
+    uint32_t CountRefusedPipeline()
+    {
+        return ++s_refusedPipelineCount;
+    }
+
+    uint32_t GetRefusedPipelineCount()
+    {
+        return s_refusedPipelineCount.load();
+    }
+
+    // What the driver says about itself, for whoever reads a report of a wrong picture: the
+    // numbers and switches a renderer runs into first on a GPU it was not written on.
+    static void LogDeviceDetails(VkPhysicalDevice physicalDevice, const VkPhysicalDeviceProperties& properties)
+    {
+        const auto yesNo = [](VkBool32 value) { return value ? "yes" : "no"; };
+        const bool atLeast12 = properties.apiVersion >= VulkanRequirements::MakeVersion(1, 2);
+
+        // Which of the structures below the driver knows.
+        bool indexingKnown = atLeast12;
+        bool driverPropertiesKnown = atLeast12;
+
+        uint32_t extensionCount = 0;
+        vkEnumerateDeviceExtensionProperties(physicalDevice, nullptr, &extensionCount, nullptr);
+
+        std::vector<VkExtensionProperties> extensions(extensionCount);
+        if (extensionCount > 0 && vkEnumerateDeviceExtensionProperties(physicalDevice, nullptr, &extensionCount, extensions.data()) < 0)
+            extensionCount = 0;
+
+        for (uint32_t i = 0; i < extensionCount && i < extensions.size(); i++)
+        {
+            if (strcmp(extensions[i].extensionName, VK_EXT_DESCRIPTOR_INDEXING_EXTENSION_NAME) == 0)
+                indexingKnown = true;
+            else if (strcmp(extensions[i].extensionName, VK_KHR_DRIVER_PROPERTIES_EXTENSION_NAME) == 0)
+                driverPropertiesKnown = true;
+        }
+
+        VkPhysicalDeviceFeatures2 features = {};
+        features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
+
+        VkPhysicalDeviceDescriptorIndexingFeatures indexingFeatures = {};
+        indexingFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_INDEXING_FEATURES;
+
+        VkPhysicalDeviceProperties2 properties2 = {};
+        properties2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2;
+
+        VkPhysicalDeviceDescriptorIndexingProperties indexingProperties = {};
+        indexingProperties.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_INDEXING_PROPERTIES;
+
+        VkPhysicalDeviceDriverProperties driverProperties = {};
+        driverProperties.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DRIVER_PROPERTIES;
+
+        if (indexingKnown)
+        {
+            features.pNext = &indexingFeatures;
+            properties2.pNext = &indexingProperties;
+        }
+
+        if (driverPropertiesKnown)
+        {
+            driverProperties.pNext = properties2.pNext;
+            properties2.pNext = &driverProperties;
+        }
+
+        // Both commands came with Vulkan 1.1, which CheckDeviceRequirements() insisted on.
+        if (vkGetPhysicalDeviceFeatures2 == nullptr || vkGetPhysicalDeviceProperties2 == nullptr)
+            return;
+
+        vkGetPhysicalDeviceFeatures2(physicalDevice, &features);
+        vkGetPhysicalDeviceProperties2(physicalDevice, &properties2);
+
+        const VkPhysicalDeviceFeatures& f = features.features;
+        const VkPhysicalDeviceLimits& limits = properties.limits;
+
+        if (driverPropertiesKnown)
+        {
+            driverProperties.driverName[VK_MAX_DRIVER_NAME_SIZE - 1] = '\0';
+            driverProperties.driverInfo[VK_MAX_DRIVER_INFO_SIZE - 1] = '\0';
+        }
+
+        LOGFN("Vulkan driver: {} {} (version {:#x}, vendor {:#x}, device {:#x}, type {}).",
+            driverPropertiesKnown ? driverProperties.driverName : "unnamed", driverPropertiesKnown ? driverProperties.driverInfo : "",
+            properties.driverVersion, properties.vendorID, properties.deviceID, uint32_t(properties.deviceType));
+
+        LOGFN("Vulkan limits: {} descriptor sets, {} bytes of push constants, {} vertex attributes in {} buffers, {} colour targets, "
+              "textures up to {}, anisotropy up to {:.0f}; descriptors that may change while bound: {} textures and {} samplers per stage.",
+            limits.maxBoundDescriptorSets, limits.maxPushConstantsSize, limits.maxVertexInputAttributes, limits.maxVertexInputBindings,
+            limits.maxColorAttachments, limits.maxImageDimension2D, limits.maxSamplerAnisotropy,
+            indexingKnown ? indexingProperties.maxPerStageDescriptorUpdateAfterBindSampledImages : 0,
+            indexingKnown ? indexingProperties.maxPerStageDescriptorUpdateAfterBindSamplers : 0);
+
+        LOGFN("Vulkan features: depthClamp {}, depthBiasClamp {}, fillModeNonSolid {}, largePoints {}, wideLines {}, samplerAnisotropy {}, "
+              "independentBlend {}, dualSrcBlend {}, sampleRateShading {}, shaderClipDistance {}, shaderInt16 {}, shaderInt64 {}, "
+              "textureCompressionBC {}, textureCompressionETC2 {}, textureCompressionASTC_LDR {}; sampled images updated after bind {}.",
+            yesNo(f.depthClamp), yesNo(f.depthBiasClamp), yesNo(f.fillModeNonSolid), yesNo(f.largePoints), yesNo(f.wideLines), yesNo(f.samplerAnisotropy),
+            yesNo(f.independentBlend), yesNo(f.dualSrcBlend), yesNo(f.sampleRateShading), yesNo(f.shaderClipDistance), yesNo(f.shaderInt16), yesNo(f.shaderInt64),
+            yesNo(f.textureCompressionBC), yesNo(f.textureCompressionETC2), yesNo(f.textureCompressionASTC_LDR),
+            yesNo(indexingFeatures.descriptorBindingSampledImageUpdateAfterBind));
+
+        // Where buffers the CPU writes can end up. Memory that is not coherent has to be
+        // flushed after writing, which plume does not do.
+        VkPhysicalDeviceMemoryProperties memory = {};
+        vkGetPhysicalDeviceMemoryProperties(physicalDevice, &memory);
+
+        std::string types;
+        for (uint32_t i = 0; i < memory.memoryTypeCount && i < VK_MAX_MEMORY_TYPES; i++)
+        {
+            const VkMemoryPropertyFlags flags = memory.memoryTypes[i].propertyFlags;
+            std::string name;
+            const auto add = [&name, flags](VkMemoryPropertyFlags flag, const char* text)
+            {
+                if ((flags & flag) != 0)
+                    name += (name.empty() ? "" : "+") + std::string(text);
+            };
+
+            add(VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, "device");
+            add(VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT, "visible");
+            add(VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, "coherent");
+            add(VK_MEMORY_PROPERTY_HOST_CACHED_BIT, "cached");
+            add(VK_MEMORY_PROPERTY_LAZILY_ALLOCATED_BIT, "lazy");
+            add(VK_MEMORY_PROPERTY_PROTECTED_BIT, "protected");
+
+            types += fmt::format("{}{}: {}", i == 0 ? "" : "; ", i, name.empty() ? "plain" : name);
+        }
+
+        LOGFN("Vulkan memory types: {}.", types);
+    }
+
+    // Written once, by CheckCreatedDevice(), before any texture is created.
+    static bool s_decodeCompressedTextures = false;
+
+    RenderFormat HostTextureFormat(RenderFormat format, BcDecode::EFormat& decode)
+    {
+        decode = BcDecode::EFormat::None;
+
+        if (!s_decodeCompressedTextures || RenderFormatBlockWidth(format) <= 1)
+            return format;
+
+        switch (format)
+        {
+        case RenderFormat::BC1_TYPELESS:
+        case RenderFormat::BC1_UNORM:
+        case RenderFormat::BC1_UNORM_SRGB:
+            decode = BcDecode::EFormat::BC1;
+            break;
+
+        case RenderFormat::BC2_TYPELESS:
+        case RenderFormat::BC2_UNORM:
+        case RenderFormat::BC2_UNORM_SRGB:
+            decode = BcDecode::EFormat::BC2;
+            break;
+
+        case RenderFormat::BC3_TYPELESS:
+        case RenderFormat::BC3_UNORM:
+        case RenderFormat::BC3_UNORM_SRGB:
+            decode = BcDecode::EFormat::BC3;
+            break;
+
+        case RenderFormat::BC4_TYPELESS:
+        case RenderFormat::BC4_UNORM:
+            decode = BcDecode::EFormat::BC4;
+            return RenderFormat::R8_UNORM;
+
+        case RenderFormat::BC5_TYPELESS:
+        case RenderFormat::BC5_UNORM:
+            decode = BcDecode::EFormat::BC5;
+            return RenderFormat::R8G8_UNORM;
+
+        case RenderFormat::BC7_TYPELESS:
+        case RenderFormat::BC7_UNORM:
+        case RenderFormat::BC7_UNORM_SRGB:
+            decode = BcDecode::EFormat::BC7;
+            break;
+
+        default:
+        {
+            // Signed and floating-point blocks (BC4/BC5 SNORM, BC6H) have no plain format
+            // here to unpack to. Mods are the only place they could come from.
+            static std::atomic<bool> s_warned{ false };
+            if (!s_warned.exchange(true))
+                LOGFN_WARNING("A texture in a block-compressed format this GPU cannot sample, and that is not unpacked (format {}), will not show.", uint32_t(format));
+
+            return format;
+        }
+        }
+
+        if (format == RenderFormat::BC1_UNORM_SRGB || format == RenderFormat::BC2_UNORM_SRGB ||
+            format == RenderFormat::BC3_UNORM_SRGB || format == RenderFormat::BC7_UNORM_SRGB)
+        {
+            static std::atomic<bool> s_warned{ false };
+            if (!s_warned.exchange(true))
+                LOGN_WARNING("An sRGB block-compressed texture is unpacked without its sRGB curve and will look brighter than it should.");
+        }
+
+        return RenderFormat::R8G8B8A8_UNORM;
+    }
+
+    bool CheckCreatedDevice(RenderDevice* device)
+    {
+        auto* vulkanDevice = static_cast<VulkanDevice*>(device);
+        const RenderDeviceCapabilities& capabilities = device->getCapabilities();
+
+        LogDeviceDetails(vulkanDevice->physicalDevice, vulkanDevice->physicalDeviceProperties);
+
+        // Block-compressed textures: Adreno samples them, most other phone GPUs do not.
+        {
+            VkPhysicalDeviceFeatures features = {};
+            vkGetPhysicalDeviceFeatures(vulkanDevice->physicalDevice, &features);
+
+            s_decodeCompressedTextures = !features.textureCompressionBC || Config::DecodeCompressedTextures;
+            if (!features.textureCompressionBC)
+            {
+                LOGN("Textures: this GPU cannot sample block-compressed (BC, DXT) textures. "
+                     "They are unpacked when they are loaded, which takes four to eight times the memory.");
+            }
+            else if (s_decodeCompressedTextures)
+            {
+                LOGN("Textures: block-compressed textures are unpacked when they are loaded, as Video.DecodeCompressedTextures in config.toml asks. This GPU can sample them.");
+            }
+        }
+
+        // CheckDeviceRequirements() found the features in the driver. Whether plume switched
+        // them on is another matter: it goes by the names of the extensions they began as,
+        // which a driver need not list once they are part of its Vulkan version. Whether
+        // the game draws correctly without is up to the driver then, so this is said and
+        // the game goes on.
+        if (!capabilities.descriptorIndexing)
+        {
+            LOGN_ERROR("The renderer did not switch on descriptor indexing: the driver has it, but does not list " VK_EXT_DESCRIPTOR_INDEXING_EXTENSION_NAME
+                       ". Textures may be missing from the picture.");
+        }
+
+        if (!capabilities.bufferDeviceAddress)
+        {
+            LOGN_ERROR("The renderer did not switch on buffer device address: the driver has it, but does not list " VK_KHR_BUFFER_DEVICE_ADDRESS_EXTENSION_NAME
+                       ". The picture may be wrong or empty.");
+        }
+
+        // The address of a buffer is asked for by the name the command has from Vulkan 1.2
+        // on. An older driver has it under the name of the extension, and what the loader
+        // hands out for either name before there is a device need not be the driver's own
+        // command. Asked of the device, it is.
+        auto getAddress = reinterpret_cast<PFN_vkGetBufferDeviceAddress>(vkGetDeviceProcAddr(vulkanDevice->vk, "vkGetBufferDeviceAddress"));
+        const char* name = "vkGetBufferDeviceAddress";
+        if (getAddress == nullptr)
+        {
+            getAddress = reinterpret_cast<PFN_vkGetBufferDeviceAddress>(vkGetDeviceProcAddr(vulkanDevice->vk, "vkGetBufferDeviceAddressKHR"));
+            name = "vkGetBufferDeviceAddressKHR";
+        }
+
+        if (getAddress == nullptr)
+        {
+            // Without it no shader of the game finds its constants.
+            s_missingDeviceFeature = "buffer device address (the driver has no command that tells the address of a buffer)";
+            LOGFN_ERROR("This Vulkan driver cannot run the game. It lacks: {}.", s_missingDeviceFeature);
+            return false;
+        }
+
+        vkGetBufferDeviceAddress = getAddress;
+        LOGFN("Vulkan: buffer addresses come from the driver's {}.", name);
+        return true;
+    }
+
+    void CheckFramebufferSizes(uint32_t colourWidth, uint32_t colourHeight, uint32_t depthWidth, uint32_t depthHeight)
+    {
+        // Only ever called by the thread that renders.
+        static uint32_t s_reported = 0;
+
+        // A depth buffer larger than the colour target is within the rules.
+        if ((depthWidth >= colourWidth && depthHeight >= colourHeight) || s_reported >= 4)
+            return;
+
+        s_reported++;
+
+        LOGFN_WARNING("A frame buffer combines a {}x{} colour target with a {}x{} depth buffer. Vulkan does not allow the depth buffer "
+                      "to be the smaller one: this driver may draw nothing into such a frame buffer (Video.ResolutionScale is {:.2f}).",
+            colourWidth, colourHeight, depthWidth, depthHeight, Config::ResolutionScale.Value);
+    }
+
+    // The frame written to the log draw by draw. All of this belongs to the thread that renders.
+    static constexpr uint32_t LoggedDrawLimit = 48;
+    static constexpr Uint64 LoggedFrameTimesMs[] = { 20 * 1000, 120 * 1000 };
+    static bool s_frameLogged = false;
+    static uint32_t s_loggedDraws = 0;
+    static uint32_t s_loggedFrames = 0;
+    static Uint64 s_firstFrameMs = 0;
+
+    bool IsFrameLogged()
+    {
+        return s_frameLogged;
+    }
+
+    void LogDraw(const std::string& description)
+    {
+        if (!s_frameLogged)
+            return;
+
+        if (s_loggedDraws < LoggedDrawLimit)
+            LOGFN("[frame] draw {}: {}", s_loggedDraws + 1, description);
+
+        s_loggedDraws++;
+    }
+
+    bool CountFrame(uint32_t draws, uint32_t skippedDraws, uint32_t framebufferChanges)
+    {
+        // Only ever called by the thread that renders.
+        static constexpr Uint64 FirstReportMs = 15 * 1000;
+        static constexpr Uint64 ReportIntervalMs = 60 * 1000;
+
+        const Uint64 frameEndMs = SDL_GetTicks();
+        if (s_firstFrameMs == 0)
+            s_firstFrameMs = frameEndMs;
+
+        // The frame that just ended was the one written out.
+        if (s_frameLogged)
+        {
+            s_frameLogged = false;
+            LOGFN("[frame] end of the frame: {} draws{}.", s_loggedDraws,
+                s_loggedDraws > LoggedDrawLimit ? fmt::format(", of which the first {} are listed", LoggedDrawLimit) : std::string());
+        }
+
+        bool logNextFrame = false;
+        if (s_loggedFrames < std::size(LoggedFrameTimesMs) && frameEndMs - s_firstFrameMs >= LoggedFrameTimesMs[s_loggedFrames])
+        {
+            s_loggedFrames++;
+            s_loggedDraws = 0;
+            s_frameLogged = true;
+            logNextFrame = true;
+        }
+
+        static Uint64 s_windowStartMs = 0;
+        static Uint64 s_windowLengthMs = FirstReportMs;
+        static uint64_t s_frames = 0;
+        static uint64_t s_draws = 0;
+        static uint64_t s_skippedDraws = 0;
+        static uint64_t s_framebufferChanges = 0;
+        static uint32_t s_refusedAtLastReport = 0;
+
+        const Uint64 now = SDL_GetTicks();
+        if (s_windowStartMs == 0)
+            s_windowStartMs = now;
+
+        s_frames++;
+        s_draws += draws;
+        s_skippedDraws += skippedDraws;
+        s_framebufferChanges += framebufferChanges;
+
+        const Uint64 elapsed = now - s_windowStartMs;
+        if (elapsed < s_windowLengthMs)
+            return logNextFrame;
+
+        const double seconds = double(elapsed) / 1000.0;
+        const double frames = double(s_frames);
+        const uint32_t refused = GetRefusedPipelineCount();
+
+        LOGFN("[render] {:.0f} s: {:.1f} frames per second; per frame {:.0f} draws ({:.0f} of them left out: the driver refused their pipeline) "
+              "and {:.0f} changes of frame buffer; pipelines the driver refused: {} ({} since the last line).",
+            seconds, frames / seconds, double(s_draws) / frames, double(s_skippedDraws) / frames, double(s_framebufferChanges) / frames,
+            refused, refused - s_refusedAtLastReport);
+
+        s_refusedAtLastReport = refused;
+        s_windowStartMs = now;
+        s_windowLengthMs = ReportIntervalMs;
+        s_frames = 0;
+        s_draws = 0;
+        s_skippedDraws = 0;
+        s_framebufferChanges = 0;
+
+        return logNextFrame;
     }
 
     const std::string& GetMissingDeviceFeature()

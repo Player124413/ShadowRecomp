@@ -245,6 +245,15 @@ add_test(NAME shader_execution COMMAND Python3::Interpreter "${CMAKE_CURRENT_SOU
 set_tests_properties(shader_execution PROPERTIES SKIP_RETURN_CODE 77)
 set_tests_properties(shader_lowering shader_execution PROPERTIES ENVIRONMENT "PYTHONDONTWRITEBYTECODE=1")
 
+# --- Block-compressed textures for GPUs that cannot sample them --------------------------
+# gpu/bc_decode.cpp, which unpacks them when they are loaded.
+android_test_executable(bc_decode_test SOURCES
+    bc_decode_test.cpp
+    "${GAME_ROOT}/gpu/bc_decode.cpp"
+)
+target_include_directories(bc_decode_test PRIVATE "${THIRDPARTY_ROOT}/bcdec")
+add_test(NAME texture_unpacking COMMAND bc_decode_test)
+
 # --- Build tools (Python) ---------------------------------------------------------------
 # fetch-xbe.py gets default.xbe out of a disc image, an archive, a folder or a link;
 # stub-recompiler.py stands in for XboxRecomp2 when the pipeline is tested without the game.

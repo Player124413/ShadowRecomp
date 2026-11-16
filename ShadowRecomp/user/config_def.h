@@ -134,9 +134,12 @@ CONFIG_DEFINE_ENUM("Video", EAndroidRenderMode, RenderMode, EAndroidRenderMode::
 //   PipelineDiskCache = false              does not keep the driver's pipeline cache on disk
 //   ShadersWithoutInt64 = true             rewrites the shaders as for a driver without 64-bit
 //                                          integers, also on a driver that has them
+//   DecodeCompressedTextures = true        unpacks block-compressed textures as for a GPU that
+//                                          cannot sample them, also on one that can
 CONFIG_DEFINE_HIDDEN("Video", bool, BackgroundPipelineCompilation, true, true);
 CONFIG_DEFINE_HIDDEN("Video", bool, PipelineDiskCache, true, true);
 CONFIG_DEFINE_HIDDEN("Video", bool, ShadersWithoutInt64, false, true);
+CONFIG_DEFINE_HIDDEN("Video", bool, DecodeCompressedTextures, false, true);
 #endif
 
 CONFIG_DEFINE_HIDDEN("Codes", bool, QuickBoot, false, false);

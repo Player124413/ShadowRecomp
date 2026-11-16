@@ -11,7 +11,12 @@
 
 struct SDL_Window;
 
+#include <cstdint>
 #include <string>
+
+#include <plume_render_interface_types.h>
+
+#include "bc_decode.h"
 
 namespace plume
 {
@@ -53,6 +58,20 @@ namespace AndroidVideo
     bool CheckDeviceRequirements(plume::RenderInterface* renderInterface);
     const std::string& GetMissingDeviceFeature();
 
+    // Call right after the device was created. Looks at what plume made of the driver:
+    //
+    // - plume switches descriptor indexing and buffer device address on by the names of
+    //   the extensions they began as. A driver need not list those names once the features
+    //   are part of its Vulkan version, and then they stay off, although the check above
+    //   found them. What the game draws then is up to the driver; the log is told.
+    // - The command that tells the address of a buffer is asked of the device itself, under
+    //   its name from Vulkan 1.2 or the one of the extension, whichever the driver has.
+    //   Should it have neither, this returns false and GetMissingDeviceFeature() says so.
+    //
+    // Also writes the driver's limits, features and kinds of memory to the log, and finds
+    // out whether block-compressed textures have to be unpacked (HostTextureFormat()).
+    bool CheckCreatedDevice(plume::RenderDevice* device);
+
     // Call after the device was created and before the first shader is. On a driver
     // without 64-bit integers in shaders, makes every shader reach it rewritten to do
     // without them (see gpu/vulkan_int64_lowering.h), and says so in the log.
@@ -60,9 +79,43 @@ namespace AndroidVideo
     // a fault of the rewrite from one of a driver.
     void InitShaderRewrite(plume::RenderDevice* device);
 
+    // The format to create a texture in whose data comes in `format`.
+    //
+    // On a GPU that samples block-compressed (BC, DXT) textures this is `format` itself and
+    // `decode` is EFormat::None. Most phone GPUs other than Adreno cannot; there the result
+    // is the plain format the data unpacks to, and `decode` says what it is unpacked from
+    // (gpu/bc_decode.h) when it is uploaded. Video.DecodeCompressedTextures = true in
+    // config.toml does this on any GPU. Valid once CheckCreatedDevice() has run.
+    plume::RenderFormat HostTextureFormat(plume::RenderFormat format, BcDecode::EFormat& decode);
+
     // Whether the driver actually created a graphics pipeline. plume returns an object
     // either way and only writes the driver's error to stderr.
     bool IsPipelineUsable(const plume::RenderPipeline* pipeline);
+
+    // Counts a pipeline the driver refused and returns how many that makes; and how many
+    // there have been. Any thread may call these.
+    uint32_t CountRefusedPipeline();
+    uint32_t GetRefusedPipelineCount();
+
+    // Call when a frame buffer is put together from a colour target and a depth buffer.
+    // Vulkan wants every part of a frame buffer to be at least as large as the frame
+    // buffer, which plume sizes by the colour target. Desktop drivers and Turnip draw into
+    // a smaller depth buffer regardless; a driver that goes by the rules may draw nothing.
+    // The depth buffer of the game is kept large enough (CoverBackBuffer() in video.cpp);
+    // should another one turn up that is not, the log is told the first few times.
+    void CheckFramebufferSizes(uint32_t colourWidth, uint32_t colourHeight, uint32_t depthWidth, uint32_t depthHeight);
+
+    // Call at the end of every frame, from the thread that renders, with what the frame
+    // took. Every minute, and once shortly after the start, a line that starts with
+    // [render] tells the log how the game is drawing: without it a report of a wrong
+    // picture or a low frame rate says nothing about where to look.
+    //
+    // Twice in a run, 20 seconds and 2 minutes in, it returns true: the frame that follows
+    // is one to write to the log draw by draw (IsFrameLogged() is true while it lasts, and
+    // LogDraw() takes a line for each draw, of which the first few dozen are kept).
+    bool CountFrame(uint32_t draws, uint32_t skippedDraws, uint32_t framebufferChanges);
+    bool IsFrameLogged();
+    void LogDraw(const std::string& description);
 
     // Writes to the log which of the texture formats the renderer creates this GPU driver
     // supports. Nothing is enforced: unlike on desktop these vary between mobile GPUs, and

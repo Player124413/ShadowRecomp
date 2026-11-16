@@ -375,6 +375,10 @@ struct GuestBaseTexture : GuestResource
 	RenderTextureLayout layout = RenderTextureLayout::UNKNOWN;
 	bool wasResized = false;
 
+	// Android: a depth buffer whose texture is kept at least as large as the back buffer,
+	// whatever its own size works out as (see CoverBackBuffer() in video.cpp).
+	bool coversBackBuffer = false;
+
 	GuestBaseTexture(ResourceType type) : GuestResource(type)
 	{
 	}
