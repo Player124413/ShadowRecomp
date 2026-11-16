@@ -13,8 +13,8 @@ on:
         type: boolean
         required: false
         default: false
-  # release.yml calls this. The game then comes from the GAME_ISO_URL secret, or from the
-  # asset repository the other build workflows use.
+  # Called by release.yml and build-android-dev.yml. The game then comes from the
+  # GAME_ISO_URL secret, or from the asset repository the other build workflows use.
   workflow_call:
     inputs:
       stub_build:
@@ -48,8 +48,10 @@ on:
         required: false
 permissions:
   contents: read
+# A newer run for the same branch replaces the one in progress. Runs started by hand and
+# runs started by a push do not cancel each other.
 concurrency:
-  group: build-android-${{ github.ref }}
+  group: build-android-${{ github.event_name }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -218,7 +220,10 @@ jobs:
               echo "::error title=XboxRecomp2::Release ${version} could not be downloaded: a real build would fail here."
               exit 1
             fi
-            "$(printf '%s\n' "${output}" | tail -n 1)" --help | grep -q recompile
+            if ! "$(printf '%s\n' "${output}" | tail -n 1)" --help | grep -q recompile; then
+              echo "::error title=XboxRecomp2::Release ${version} does not start on this runner: a real build would fail here."
+              exit 1
+            fi
             echo "::notice title=XboxRecomp2::Release ${version} downloads and starts on this runner."
 
             recompiler="-DSHADOW_RECOMP_XBOXRECOMP2_EXECUTABLE=${GITHUB_WORKSPACE}/tools/android/stub-recompiler.py"
