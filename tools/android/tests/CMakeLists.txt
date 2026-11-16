@@ -11,7 +11,7 @@
 #   ctest --test-dir out/build/android-tests --output-on-failure
 #
 # Needs a host C++20 compiler (GCC or Clang), Python 3 and the submodules. Without a JDK
-# the Java tests are left out.
+# the Java tests are left out; without curl or 7z, the tests of links and of .7z archives.
 
 cmake_minimum_required(VERSION 3.20)
 
@@ -139,6 +139,13 @@ android_test_executable(logger_harness NO_ADDRESS_SANITIZER SOURCES
 target_link_libraries(logger_harness PRIVATE Threads::Threads ${CMAKE_DL_LIBS})
 add_test(NAME logger COMMAND Python3::Interpreter "${CMAKE_CURRENT_SOURCE_DIR}/logger_test.py" $<TARGET_FILE:logger_harness>)
 set_tests_properties(logger PROPERTIES TIMEOUT 300)
+
+# --- Build tools (Python) ---------------------------------------------------------------
+# fetch-xbe.py gets default.xbe out of a disc image, an archive, a folder or a link;
+# stub-recompiler.py stands in for XboxRecomp2 when the pipeline is tested without the game.
+add_test(NAME fetch_xbe COMMAND Python3::Interpreter "${CMAKE_CURRENT_SOURCE_DIR}/fetch_xbe_test.py")
+add_test(NAME stub_recompiler COMMAND Python3::Interpreter "${CMAKE_CURRENT_SOURCE_DIR}/stub_recompiler_test.py")
+set_tests_properties(fetch_xbe stub_recompiler PROPERTIES ENVIRONMENT "PYTHONDONTWRITEBYTECODE=1")
 
 # --- Launcher (Java) --------------------------------------------------------------------
 # The launcher classes without Android dependencies: the Xbox disc image check, the game

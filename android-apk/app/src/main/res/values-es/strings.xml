@@ -149,6 +149,7 @@
     <string name="error_copy_cancelled">Copia cancelada. Se conservó la instalación actual.</string>
     <string name="error_storage_selection">No se pudo guardar el almacenamiento elegido.</string>
     <string name="storage_native_unavailable">El almacenamiento elegido no está disponible o no permite escribir. Vuelve a conectar la tarjeta SD o elige otro almacenamiento en el lanzador.</string>
+    <string name="stub_build">Esta es una compilación de prueba sin el código del juego, por lo que no puede iniciarlo. Instala una compilación creada a partir del ejecutable del juego.</string>
     <string name="installer_failed">No se pudieron instalar los archivos del juego:\n%1$s\n\nUsa una imagen de disco intacta de Shadow the Hedgehog (Xbox) y comprueba el espacio libre. Los detalles están en el registro.</string>
     <string name="installer_game_missing">No se encontraron los archivos del juego. Usa «Instalar juego» en el lanzador para importar tu imagen de disco de Xbox (.iso), un archivo ZIP o una carpeta de disco extraído.</string>
     <string name="error_file_empty">El archivo seleccionado está vacío.</string>

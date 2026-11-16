@@ -149,6 +149,7 @@
     <string name="error_copy_cancelled">コピーをキャンセルしました。現在のインストールは保持されています。</string>
     <string name="error_storage_selection">保存先の選択を保存できませんでした。</string>
     <string name="storage_native_unavailable">選択した保存先を利用できないか、書き込めません。SDカードを接続し直すか、ランチャーで別の保存先を選択してください。</string>
+    <string name="stub_build">これはゲームのコードを含まないテスト用ビルドのため、ゲームを起動できません。ゲームの実行ファイルから作成したビルドをインストールしてください。</string>
     <string name="installer_failed">ゲームファイルをインストールできませんでした:\n%1$s\n\n破損していない Shadow the Hedgehog（Xbox）のディスクイメージを使用し、空き容量を確認してください。詳細はログにあります。</string>
     <string name="installer_game_missing">ゲームファイルが見つかりません。ランチャーの「ゲームをインストール」で Xbox ディスクイメージ（.iso）、ZIPアーカイブ、または展開済みディスクのフォルダーを取り込んでください。</string>
     <string name="error_file_empty">選択したファイルは空です。</string>

@@ -206,6 +206,18 @@ int main(int argc, char* argv[])
         std::_Exit(1);
     }
 
+#ifdef X86_RECOMP_STUB
+    {
+        // Built with tools/android/stub-recompiler.py to test the build pipeline: every
+        // guest function is empty, so there is no game to start.
+        LOGN_ERROR("This build was made without the game's code (stub recompiler) and cannot run the game.");
+        const auto message = os::android::LocaliseMessage("stub_build",
+            "This is a test build made without the game's code, so it cannot start the game. Install a build made from the game's executable.");
+        SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "Shadow Recompiled", message.c_str(), nullptr);
+        std::_Exit(1);
+    }
+#endif
+
     {
         // The user path is nested two levels below the storage root, and Config::Save()
         // only creates its last component (and throws if the parent is missing). The

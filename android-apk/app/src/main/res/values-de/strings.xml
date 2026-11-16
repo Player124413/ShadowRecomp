@@ -149,6 +149,7 @@
     <string name="error_copy_cancelled">Kopieren abgebrochen. Die aktuelle Installation bleibt erhalten.</string>
     <string name="error_storage_selection">Der gewählte Speicherort konnte nicht gespeichert werden.</string>
     <string name="storage_native_unavailable">Der gewählte Speicherort ist nicht verfügbar oder nicht beschreibbar. Verbinde die SD-Karte erneut oder wähle im Launcher einen anderen Speicherort.</string>
+    <string name="stub_build">Dies ist ein Test-Build ohne den Code des Spiels und kann das Spiel daher nicht starten. Installiere einen Build, der aus der ausführbaren Datei des Spiels erstellt wurde.</string>
     <string name="installer_failed">Die Spieldateien konnten nicht installiert werden:\n%1$s\n\nVerwende ein unbeschädigtes Disc-Abbild von Shadow the Hedgehog (Xbox) und prüfe den freien Speicher. Details stehen im Protokoll.</string>
     <string name="installer_game_missing">Spieldateien nicht gefunden. Nutze „Spiel installieren“ im Launcher, um dein Xbox-Disc-Abbild (.iso), ein ZIP-Archiv oder einen entpackten Disc-Ordner zu importieren.</string>
     <string name="error_file_empty">Die gewählte Datei ist leer.</string>

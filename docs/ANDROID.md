@@ -146,7 +146,12 @@ Build on x86-64 Linux, which is what the CI workflow does.
 ### 1. Prerequisites
 
 Follow steps 1 and 2 of [BUILDING.md](BUILDING.md) first: clone with submodules and
-copy `default.xbe` to `./ShadowRecompLib/private/`.
+copy `default.xbe` to `./ShadowRecompLib/private/`. If the game is still in a disc
+image, this takes the file out of it and checks that it is a dump the project supports:
+
+```bash
+tools/android/fetch-xbe.py "/path/to/Shadow the Hedgehog.iso"
+```
 
 Then install:
 
@@ -267,8 +272,9 @@ answer with the build tree that the APK was made from:
 
 The Android-specific code (driver selection and startup recovery, driver import, the
 staged game installation, the on-screen controls, logging, and the launcher's handling
-of archives, disc images and storage copies) has tests that run on the build machine.
-They need neither the NDK nor a device nor the game files:
+of archives, disc images and storage copies) and the build tools in `tools/android`
+have tests that run on the build machine. They need neither the NDK nor a device nor
+the game files:
 
 ```bash
 cmake -S tools/android/tests -B out/build/android-tests
@@ -278,13 +284,71 @@ ctest --test-dir out/build/android-tests --output-on-failure
 
 ## GitHub Actions
 
-`.github/workflows/build-android.yml` builds the APK. It is started by hand from the
-Actions tab and is called by the release workflow, which attaches the APK to the
-release as `ShadowRecomp-Android-arm64-<version>.apk`. It runs the [tests](#tests)
-first; a failing test is marked on the run but does not stop the build.
+`.github/workflows/build-android.yml` builds the APK on GitHub. All it needs from you is
+the game, as a link to your disc image.
 
-It uses the same secrets as the other build workflows (`ASSET_REPO`,
-`ASSET_REPO_TOKEN`, `XBOXRECOMP2_TOKEN`). Signing is optional and takes four more:
+### Building in your fork
+
+1. Open the **Actions** tab of the repository and pick **build-android** on the left.
+2. Press **Run workflow**, paste the link to your disc image of Shadow the Hedgehog
+   (Xbox) into the first field and press the green **Run workflow** button.
+3. When the run has finished, the APK is under **Artifacts** at the bottom of its page,
+   for three days.
+
+> [!NOTE]
+> GitHub only shows the **Run workflow** button for workflows that are in the default
+> branch of the repository.
+
+The run downloads the disc image, takes `default.xbe` out of it, checks that it is a
+dump of the game the project supports and deletes everything else. XboxRecomp2 then
+turns the executable into C++ and the build described above follows. The APK holds the
+recompiled game code and none of the game's files: those are installed on the device
+from your disc image ([Installing the game](#installing-the-game)).
+
+The link can point to:
+
+- an `.iso`, either a bare file system image or a full disc dump;
+- a `.zip` or `.7z` with such an image, or with the extracted files of the game.
+
+It has to download the file itself. Share links of Google Drive, Dropbox and Yandex Disk
+are understood; other file hosts that show a web page first are not.
+
+The link is kept out of the log of the run. To not paste it every time, save it as the
+repository secret `GAME_ISO_URL` (**Settings > Secrets and variables > Actions**) and
+leave the field empty.
+
+> [!IMPORTANT]
+> The artifacts of a public repository can be downloaded by anyone who is signed in to
+> GitHub.
+
+If a run fails, the lines of the log that explain why are on the summary page of the
+run, and the complete logs are attached to it as an artifact.
+
+### Testing the workflow without the game
+
+Tick **stub_build** instead of giving a link. The run then goes through every step with
+a placeholder: a made-up disc image is downloaded and unpacked like a real one, and
+`tools/android/stub-recompiler.py` takes the place of XboxRecomp2 and writes empty
+functions. The result is a real APK, named `-stub`, whose launcher works and whose game
+says that it has no game code. This is for checking the workflow, the toolchain and the
+packaging after a change; it tells nothing about the recompiled game.
+
+The same build can be made locally:
+
+```bash
+tools/android/tests/make_test_iso.py /tmp/test.iso
+tools/android/fetch-xbe.py /tmp/test.iso --no-verify
+tools/android/build.sh release -DSHADOW_RECOMP_XBOXRECOMP2_EXECUTABLE=$PWD/tools/android/stub-recompiler.py
+```
+
+### Releases and signing
+
+The release workflow calls `build-android.yml` and attaches the APK to the release as
+`ShadowRecomp-Android-arm64-<version>.apk`. There is no field for a link then: the game
+comes from the `GAME_ISO_URL` secret or, failing that, from the asset repository of the
+other build workflows (`ASSET_REPO`, `ASSET_REPO_TOKEN`).
+
+Signing is optional and takes four more secrets:
 
 | Secret                      | Value                                              |
 | --------------------------- | -------------------------------------------------- |

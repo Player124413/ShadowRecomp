@@ -1,15 +1,30 @@
 name: build-android
 on:
-  # Not part of validate.yml yet: run it from the Actions tab, or let release.yml call it.
+  # Actions tab > build-android > Run workflow. See docs/ANDROID.md.
   workflow_dispatch:
+    inputs:
+      iso_url:
+        description: "Link to your Shadow the Hedgehog (Xbox) disc image: an .iso, or a .zip / .7z with it"
+        type: string
+        required: false
+        default: ""
+      stub_build:
+        description: "Pipeline test: build without the game. The app from it cannot start the game."
+        type: boolean
+        required: false
+        default: false
+  # release.yml calls this. The game then comes from the GAME_ISO_URL secret, or from the
+  # asset repository the other build workflows use.
   workflow_call:
     secrets:
+      GAME_ISO_URL:
+        required: false
       ASSET_REPO:
-        required: true
+        required: false
       ASSET_REPO_TOKEN:
-        required: true
+        required: false
       XBOXRECOMP2_TOKEN:
-        required: true
+        required: false
       # Optional release signing, see docs/ANDROID.md. Without these the APK is signed
       # with the runner's throwaway debug key: it installs, but cannot be updated in place.
       ANDROID_KEYSTORE_BASE64:
@@ -20,8 +35,14 @@ on:
         required: false
       ANDROID_KEY_PASSWORD:
         required: false
+  # TEMPORARY, while the workflow is being tested on this branch: every push is a pipeline test.
+  push:
+    branches: ['arena/54f59919-shadowrecomp']
 permissions:
   contents: read
+concurrency:
+  group: build-android-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   build-android:
@@ -47,31 +68,13 @@ jobs:
         with:
           ref: ${{ github.event_name == 'pull_request_target' && github.event.pull_request.head.sha || '' }}
           allow-unsafe-pr-checkout: true
-          token: ${{ secrets.ASSET_REPO_TOKEN }}
+          token: ${{ secrets.ASSET_REPO_TOKEN || github.token }}
 
-      # HACK: Fine-grained token can't access cross-org repos.
-      # REMOVE when XboxRecomp2 & assets repo go public.
-      # vcpkg is skipped as well: the Android build doesn't use it.
+      # vcpkg is skipped: the Android build doesn't use it.
       - name: Checkout Submodules
-        env:
-          TOKEN: ${{ secrets.ASSET_REPO_TOKEN }}
         run: >-
-          git -c "url.https://x-access-token:${TOKEN}@github.com/.insteadOf=https://github.com/"
-          -c submodule.tools/XboxRecomp2.update=none
-          -c submodule.thirdparty/vcpkg.update=none
-          submodule update --init --recursive
-
-      - name: Checkout Private Repository
-        uses: actions/checkout@v7
-        with:
-          repository: ${{ secrets.ASSET_REPO }}
-          token: ${{ secrets.ASSET_REPO_TOKEN }}
-          path: ./private
-
-      - name: Install Dependencies
-        run: |-
-          sudo apt update
-          sudo apt install -y ninja-build
+          git -c submodule.thirdparty/vcpkg.update=none
+          submodule update --init --recursive --depth 1
 
       # The Android Gradle Plugin needs JDK 17; the runner defaults to a newer one.
       - name: Setup Java
@@ -80,14 +83,100 @@ jobs:
           distribution: temurin
           java-version: 17
 
+      # Decides where default.xbe, the one game file the build needs, comes from:
+      #   stub        nowhere: a pipeline test with placeholder code instead of the game
+      #   link        a disc image behind a link (the iso_url input, else the GAME_ISO_URL secret)
+      #   asset-repo  the private repository the other build workflows use
+      - name: Find the Game
+        id: game
+        env:
+          STUB_BUILD: ${{ inputs.stub_build || github.event_name == 'push' }}
+          GAME_ISO_URL: ${{ secrets.GAME_ISO_URL }}
+          HAS_ASSET_REPO: ${{ secrets.ASSET_REPO != '' && secrets.ASSET_REPO_TOKEN != '' }}
+        run: |-
+          mkdir -p "${RUNNER_TEMP}/logs"
+
+          # The link is read from the event instead of being passed in through `env`, and
+          # masked before anything else happens, so that it never shows up in the log.
+          link=""
+          if [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ]; then
+            link="$(jq -r '.inputs.iso_url // empty' "${GITHUB_EVENT_PATH}" | tr -d '\r\n' | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
+          fi
+          if [ -z "${link}" ]; then
+            link="${GAME_ISO_URL}"
+          fi
+          if [ -n "${link}" ]; then
+            echo "::add-mask::${link//'%'/'%25'}"
+          fi
+
+          if [ "${STUB_BUILD}" = "true" ]; then
+            source="stub"
+            echo "::warning title=Pipeline test::This run builds without the game. Its APK is named -stub and cannot start the game."
+          elif [ -n "${link}" ]; then
+            source="link"
+          elif [ "${HAS_ASSET_REPO}" = "true" ]; then
+            source="asset-repo"
+          else
+            echo "::error title=No game::Start the workflow with a link to your disc image of Shadow the Hedgehog (Xbox) in the iso_url field, or save the link as the repository secret GAME_ISO_URL. See docs/ANDROID.md."
+            exit 1
+          fi
+
+          echo "source=${source}" >> "${GITHUB_OUTPUT}"
+          echo "GAME_SOURCE=${source}" >> "${GITHUB_ENV}"
+          if [ "${source}" = "stub" ]; then
+            echo "ARTIFACT_SUFFIX=-stub" >> "${GITHUB_ENV}"
+          fi
+
+          case "${source}" in
+            link)
+              python3 ./tools/android/fetch-xbe.py "${link}"
+              ;;
+            stub)
+              # The placeholder takes the same road as a real disc image: a full disc
+              # dump, packed, behind a link.
+              stub="${RUNNER_TEMP}/stub-game"
+              mkdir -p "${stub}"
+              python3 ./tools/android/tests/make_test_iso.py "${stub}/Pipeline test.iso" --partition-offset 0x18300000
+              (cd "${stub}" && 7z a -bd -y -mx=1 game.7z "Pipeline test.iso" > /dev/null && rm "Pipeline test.iso")
+              python3 -m http.server 8731 --bind 127.0.0.1 --directory "${stub}" > /dev/null 2>&1 &
+              server=$!
+              trap 'kill "${server}" 2> /dev/null || true' EXIT
+              for attempt in $(seq 1 50); do
+                curl --fail --silent --output /dev/null "http://127.0.0.1:8731/" && break
+                sleep 0.2
+              done
+              python3 ./tools/android/fetch-xbe.py "http://127.0.0.1:8731/game.7z" --no-verify
+              ;;
+          esac
+
+      - name: Checkout Private Repository
+        if: steps.game.outputs.source == 'asset-repo'
+        uses: actions/checkout@v7
+        with:
+          repository: ${{ secrets.ASSET_REPO }}
+          token: ${{ secrets.ASSET_REPO_TOKEN }}
+          path: ./private
+
+      - name: Prepare Project
+        if: steps.game.outputs.source == 'asset-repo'
+        run: cp ./private/* ./ShadowRecompLib/private
+
       # Tests of the Android-only code that run on the build machine (docs/ANDROID.md).
       # A failure is reported on the run but does not stop the APK from being built.
       - name: Run Tests
         continue-on-error: true
         run: |-
-          cmake -S ./tools/android/tests -B ./out/build/android-tests -G Ninja
-          cmake --build ./out/build/android-tests
-          ctest --test-dir ./out/build/android-tests --output-on-failure
+          set -o pipefail
+          cmake -S ./tools/android/tests -B ./out/build/android-tests -G Ninja 2>&1 | tee "${RUNNER_TEMP}/logs/tests.log"
+          cmake --build ./out/build/android-tests 2>&1 | tee -a "${RUNNER_TEMP}/logs/tests.log"
+          if ctest --test-dir ./out/build/android-tests --output-on-failure 2>&1 | tee -a "${RUNNER_TEMP}/logs/tests.log"; then
+            echo "::notice title=Tests::$(grep -E 'tests passed' "${RUNNER_TEMP}/logs/tests.log" | tail -n 1)"
+            touch "${RUNNER_TEMP}/logs/tests.ok"
+          else
+            failed="$(sed -n '/The following tests FAILED/,$p' "${RUNNER_TEMP}/logs/tests.log" | { grep -E '^\s+[0-9]+ - ' || true; } | tr -s ' \t' ' ' | tr '\n' ';')"
+            echo "::warning title=Tests::Some tests failed:${failed} The build goes on; see the log of this step."
+            exit 1
+          fi
 
       # The runner's ANDROID_NDK_HOME points at its default NDK, not the one this project pins.
       - name: Setup Android NDK
@@ -100,21 +189,41 @@ jobs:
       - name: Setup ccache
         uses: hendrikmuhs/ccache-action@v1.2
         with:
-          key: ${{ runner.os }}-android-${{ matrix.arch.name }}-${{ matrix.preset }}
+          key: ${{ runner.os }}-android-${{ matrix.arch.name }}-${{ matrix.preset }}${{ env.ARTIFACT_SUFFIX }}
 
-      - name: Prepare Project
-        run: cp ./private/* ./ShadowRecompLib/private
-
-      # HACK: GH_TOKEN for private XboxRecomp2. REMOVE when public.
+      # XboxRecomp2 turns default.xbe into C++ here. GH_TOKEN is only used if its release
+      # cannot be downloaded anonymously.
       - name: Configure Project
         env:
-          GH_TOKEN: ${{ secrets.XBOXRECOMP2_TOKEN }}
-        run: cmake . --preset ${{ env.CMAKE_PRESET }} -DCMAKE_CXX_COMPILER_LAUNCHER=ccache -DCMAKE_C_COMPILER_LAUNCHER=ccache -DSHADOW_RECOMP_XBOXRECOMP2=binary
+          GH_TOKEN: ${{ secrets.XBOXRECOMP2_TOKEN || github.token }}
+        run: |-
+          set -o pipefail
+          if [ "${GAME_SOURCE}" = "stub" ]; then
+            # A pipeline test does everything except recompile. At least check that the
+            # recompiler of a real build can be downloaded and started on this runner.
+            version="$(sed -n 's/^set(SHADOW_RECOMP_XBOXRECOMP2_VERSION "\([^"]*\)".*/\1/p' ./ShadowRecompLib/cmake/recompile/select.cmake)"
+            if ! output="$(cmake -DVERSION="${version}" -DDESTINATION="${RUNNER_TEMP}/xboxrecomp2" -P ./ShadowRecompLib/cmake/recompile/select/download.cmake 2>&1)"; then
+              echo "${output}"
+              echo "::error title=XboxRecomp2::Release ${version} could not be downloaded: a real build would fail here."
+              exit 1
+            fi
+            "$(printf '%s\n' "${output}" | tail -n 1)" --help | grep -q recompile
+            echo "::notice title=XboxRecomp2::Release ${version} downloads and starts on this runner."
+
+            recompiler="-DSHADOW_RECOMP_XBOXRECOMP2_EXECUTABLE=${GITHUB_WORKSPACE}/tools/android/stub-recompiler.py"
+          else
+            recompiler="-DSHADOW_RECOMP_XBOXRECOMP2=binary"
+          fi
+          cmake . --preset "${CMAKE_PRESET}" -DCMAKE_CXX_COMPILER_LAUNCHER=ccache -DCMAKE_C_COMPILER_LAUNCHER=ccache "${recompiler}" 2>&1 | tee "${RUNNER_TEMP}/logs/configure.log"
+          touch "${RUNNER_TEMP}/logs/configure.ok"
 
       # Builds libmain.so and copies it, with the Vulkan driver loader's hook libraries,
       # into android-apk/app/src/main/jniLibs.
       - name: Build Project
-        run: cmake --build ./out/build/${{ env.CMAKE_PRESET }} --target android-jnilibs
+        run: |-
+          set -o pipefail
+          cmake --build "./out/build/${CMAKE_PRESET}" --target android-jnilibs 2>&1 | tee "${RUNNER_TEMP}/logs/build.log"
+          touch "${RUNNER_TEMP}/logs/build.ok"
 
       - name: Fetch Vulkan Drivers
         run: ./tools/android/fetch-drivers.sh
@@ -127,21 +236,40 @@ jobs:
           ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
         run: |-
+          set -o pipefail
           if [ -n "${ANDROID_KEYSTORE_BASE64}" ]; then
             printf '%s' "${ANDROID_KEYSTORE_BASE64}" | base64 -d > "${RUNNER_TEMP}/release.keystore"
             export ANDROID_KEYSTORE_FILE="${RUNNER_TEMP}/release.keystore"
-            ./gradlew --no-daemon assembleRelease
+            ./gradlew --no-daemon assembleRelease 2>&1 | tee "${RUNNER_TEMP}/logs/gradle.log"
             apk=./app/build/outputs/apk/release/app-release.apk
           else
-            echo "::warning::No signing keystore is configured: building a debug-signed APK, which cannot be updated in place."
-            ./gradlew --no-daemon assembleDebug
+            echo "::warning title=Debug key::No signing keystore is configured: the APK is signed with a debug key, so it cannot be updated in place by a later build."
+            ./gradlew --no-daemon assembleDebug 2>&1 | tee "${RUNNER_TEMP}/logs/gradle.log"
             apk=./app/build/outputs/apk/debug/app-debug.apk
           fi
-          cp "${apk}" ../ShadowRecomp-Android-${{ matrix.arch.name }}-${{ env.CMAKE_PRESET }}.apk
+          touch "${RUNNER_TEMP}/logs/gradle.ok"
+          cp "${apk}" "../ShadowRecomp-Android-${{ matrix.arch.name }}-${CMAKE_PRESET}${ARTIFACT_SUFFIX}.apk"
+          echo "::notice title=APK::$(du -h "${apk}" | cut -f1) $(basename "${apk}"), libmain.so $(du -h ./app/src/main/jniLibs/arm64-v8a/libmain.so | cut -f1)"
 
       - name: Upload Artifact
         uses: actions/upload-artifact@v7
         with:
-          name: ShadowRecomp-Android-${{ matrix.arch.name }}-${{ env.CMAKE_PRESET }}
-          path: ./ShadowRecomp-Android-${{ matrix.arch.name }}-${{ env.CMAKE_PRESET }}.apk
+          name: ShadowRecomp-Android-${{ matrix.arch.name }}-${{ env.CMAKE_PRESET }}${{ env.ARTIFACT_SUFFIX }}
+          path: ./ShadowRecomp-Android-${{ matrix.arch.name }}-${{ env.CMAKE_PRESET }}${{ env.ARTIFACT_SUFFIX }}.apk
+          if-no-files-found: error
+          retention-days: 3
+
+      # The logs of the build are long. When it fails, the lines that matter are put on
+      # the summary page of the run.
+      - name: Report Failure
+        if: failure()
+        run: ./tools/android/ci-report.sh "${RUNNER_TEMP}/logs"
+
+      - name: Upload Logs
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: ShadowRecomp-Android-${{ matrix.arch.name }}-${{ env.CMAKE_PRESET }}-logs
+          path: ${{ runner.temp }}/logs
+          if-no-files-found: ignore
           retention-days: 3

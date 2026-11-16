@@ -59,6 +59,14 @@ add_library(ShadowRecompLib
     ${OPTIONAL_SOURCES}
 )
 
+if (ANDROID)
+    # The NDK compiles everything with -g, the desktop release builds have no debug
+    # information at all. The recompiled game is by far the largest part of the build and
+    # nobody steps through generated code, so in release builds it is compiled like on
+    # desktop. Its function names stay in the symbol table of the unstripped library.
+    target_compile_options(ShadowRecompLib PRIVATE $<$<CONFIG:Release>:-g0>)
+endif()
+
 target_include_directories(ShadowRecompLib PUBLIC ${CMAKE_CURRENT_BINARY_DIR} ${CMAKE_CURRENT_SOURCE_DIR})
 target_precompile_headers(ShadowRecompLib PUBLIC "${CMAKE_CURRENT_BINARY_DIR}/x86/x86_recomp_shared.h")
 
