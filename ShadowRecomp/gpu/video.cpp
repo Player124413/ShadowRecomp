@@ -2731,6 +2731,10 @@ bool Video::CreateHostDevice(const char* sdlVideoDriver, bool graphicsApiRetry)
 	STARTUP_PHASE("graphics driver loaded and device created");
 
 #ifdef __ANDROID__
+	// Before the first shader is created: a driver without 64-bit integers gets every one
+	// of them rewritten.
+	AndroidVideo::InitShaderRewrite(g_device.get());
+
 	// Before the first pipeline is created: from here on the driver reuses what it compiled
 	// in earlier runs.
 	AndroidVideo::InitPipelineCache(g_device.get());

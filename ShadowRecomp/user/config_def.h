@@ -132,8 +132,11 @@ CONFIG_DEFINE_ENUM("Video", EAndroidRenderMode, RenderMode, EAndroidRenderMode::
 // once someone has written them there.
 //   BackgroundPipelineCompilation = false  creates all cached pipelines before the game starts
 //   PipelineDiskCache = false              does not keep the driver's pipeline cache on disk
+//   ShadersWithoutInt64 = true             rewrites the shaders as for a driver without 64-bit
+//                                          integers, also on a driver that has them
 CONFIG_DEFINE_HIDDEN("Video", bool, BackgroundPipelineCompilation, true, true);
 CONFIG_DEFINE_HIDDEN("Video", bool, PipelineDiskCache, true, true);
+CONFIG_DEFINE_HIDDEN("Video", bool, ShadersWithoutInt64, false, true);
 #endif
 
 CONFIG_DEFINE_HIDDEN("Codes", bool, QuickBoot, false, false);

@@ -10,19 +10,23 @@
 // - Buffer device address. The shaders do not get their constants through descriptors:
 //   they are handed the address of the buffer that holds them and read from it
 //   (vk::RawBufferLoad, see gpu/shader/shader_common.h).
-// - 64-bit integers in shaders, which those addresses are.
 //
-// The first two are extensions of Vulkan 1.1 (VK_EXT_descriptor_indexing,
+// Both are extensions of Vulkan 1.1 (VK_EXT_descriptor_indexing,
 // VK_KHR_buffer_device_address) that became part of Vulkan 1.2, and are optional in both.
 // The renderer uses no command newer than Vulkan 1.1 otherwise, so it is these features
 // that decide whether a driver will do, not its version.
+//
+// Those addresses are 64-bit integers, which the shaders are built to compute with. A
+// driver need not have them (shaderInt64), and many a phone's does not: the shaders are
+// then rewritten to do without (gpu/vulkan_int64_lowering.h), so that is asked for the
+// log only.
 namespace VulkanRequirements
 {
     struct DeviceReport
     {
         uint32_t apiVersion = 0; // VkPhysicalDeviceProperties::apiVersion.
 
-        bool shaderInt64 = false; // VkPhysicalDeviceFeatures::shaderInt64.
+        bool shaderInt64 = false; // VkPhysicalDeviceFeatures::shaderInt64. Not required.
 
         // Whether the driver offers the extension, and what it says about its features. It
         // can only be asked about them where it has the extension or Vulkan 1.2; they stay
@@ -89,9 +93,6 @@ namespace VulkanRequirements
             add("buffer device address (" + driver + " has no VK_KHR_buffer_device_address)");
         else if (!report.bufferDeviceAddress)
             add("buffer device address (this driver lacks bufferDeviceAddress)");
-
-        if (!report.shaderInt64)
-            add("64-bit integers in shaders (this driver lacks shaderInt64)");
 
         return missing;
     }

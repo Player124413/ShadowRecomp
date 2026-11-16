@@ -19,11 +19,16 @@ settings.
 
 - A 64-bit ARM (arm64-v8a) device with Android 10 or newer.
 - A GPU with a Vulkan 1.1 or newer driver that supports descriptor indexing
-  (`VK_EXT_descriptor_indexing`), buffer device address
-  (`VK_KHR_buffer_device_address`) and 64-bit integers in shaders. The first two are
-  optional parts of Vulkan 1.2; a Vulkan 1.1 driver has them only as extensions, and not
-  every one does. The game checks all of this when it starts and names what is missing
-  if the driver will not do.
+  (`VK_EXT_descriptor_indexing`) and buffer device address
+  (`VK_KHR_buffer_device_address`). Both are optional parts of Vulkan 1.2; a Vulkan 1.1
+  driver has them only as extensions, and not every one does. The game checks this when
+  it starts and names what is missing if the driver will not do.
+    - 64-bit integers in shaders (`shaderInt64`) are not required, although the game's
+      shaders are built with them: many phone GPUs lack them. On such a driver every
+      shader is rewritten to do without before the driver gets it; `log.txt` says so in
+      a line that starts with `Shaders:`. This has been tested on a software Vulkan
+      driver without 64-bit integers, not on every such GPU: if the picture is wrong or
+      the game does not start there, please report it with `log.txt`.
     - Qualcomm Adreno 6xx and newer: the app carries its own Mesa Turnip drivers, so an
       outdated system driver is not a problem.
     - Mali, PowerVR, Xclipse, older Adreno: the system driver is used, or one you
@@ -130,13 +135,14 @@ goes. Every line with `[startup]` is one step, with how long it took and how lon
 [startup] graphics driver loaded and device created: 212 ms (655 ms since Launch game was pressed)
 ```
 
-Two settings exist for narrowing down a problem with any of this. They are not in
+A few settings exist for narrowing down a problem with any of this. They are not in
 `config.toml` until you add them to its `[Video]` section:
 
 | Setting                                 | Effect                                               |
 | --------------------------------------- | ---------------------------------------------------- |
 | `BackgroundPipelineCompilation = false` | All pipelines are created before the game starts, as the desktop versions do: a longer black screen at launch, no stutter after it |
 | `PipelineDiskCache = false`             | Nothing the driver compiles is kept between launches |
+| `ShadersWithoutInt64 = true`            | The shaders are rewritten to do without 64-bit integers also on a driver that has them. On a device where the game works, this tells whether the rewrite or a driver is at fault when a device without them shows a wrong picture |
 
 ### Controls
 
@@ -320,17 +326,30 @@ answer with the build tree that the APK was made from:
 ### Tests
 
 The Android-specific code (driver selection and startup recovery, driver import, the
-check of what a Vulkan driver must support, the staged game installation, the on-screen
-controls, logging, the pipeline cache kept on disk and the background compilation queue,
-and the launcher's handling of archives, disc images and storage copies) and the build
-tools in `tools/android` have tests that run on the build machine. They need neither the
-NDK nor a device nor the game files:
+check of what a Vulkan driver must support, the rewrite of the shaders for drivers
+without 64-bit integers, the staged game installation, the on-screen controls, logging,
+the pipeline cache kept on disk and the background compilation queue, and the launcher's
+handling of archives, disc images and storage copies) and the build tools in
+`tools/android` have tests that run on the build machine. They need neither the NDK nor
+a device nor the game files:
 
 ```bash
 cmake -S tools/android/tests -B out/build/android-tests
 cmake --build out/build/android-tests
 ctest --test-dir out/build/android-tests --output-on-failure
 ```
+
+The shader rewrite is tested on every shader the game ships. Two optional pieces make
+that test stronger, and it says in its last line whether it had them:
+
+- `spirv-val` from SPIRV-Tools (`apt install spirv-tools`), or the environment variable
+  `SPIRV_VAL` naming it: every rewritten shader then also has to pass the validator.
+- A Vulkan driver, for the test `shader_execution`, which runs rewritten shaders and
+  checks what they read. A software driver will do: Mesa's lavapipe
+  (`apt install mesa-vulkan-drivers libvulkan1`), or SwiftShader, which has no 64-bit
+  integers in shaders itself and so is the closer stand-in for the phones this is for
+  (`VULKAN_LIBRARY=/path/to/libvk_swiftshader.so ctest …`). Without a driver the test
+  is skipped.
 
 ## GitHub Actions
 

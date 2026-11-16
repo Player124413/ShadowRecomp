@@ -11,7 +11,9 @@
 #   ctest --test-dir out/build/android-tests --output-on-failure
 #
 # Needs a host C++20 compiler (GCC or Clang), Python 3 and the submodules. Without a JDK
-# the Java tests are left out; without curl or 7z, the tests of links and of .7z archives.
+# the Java tests are left out; without curl or 7z, the tests of links and of .7z archives;
+# without a Vulkan driver, the test that executes shaders. spirv-val, if installed, is put
+# to use.
 
 cmake_minimum_required(VERSION 3.20)
 
@@ -172,6 +174,76 @@ target_include_directories(pipeline_cache_harness PRIVATE
 )
 target_link_libraries(pipeline_cache_harness PRIVATE Threads::Threads)
 add_test(NAME pipeline_cache COMMAND Python3::Interpreter "${CMAKE_CURRENT_SOURCE_DIR}/pipeline_cache_test.py" $<TARGET_FILE:pipeline_cache_harness>)
+
+# --- Shaders for graphics drivers without 64-bit integers --------------------------------
+# gpu/spirv_int64_lowering.cpp rewrites the game's shaders for such drivers. It is run over
+# shaders made for the test and over every shader the game ships: the HLSL ones, compiled
+# here by the compiler and with the flags of the build, and the ones of the shader cache.
+# With spirv-val (SPIRV-Tools) installed, every rewritten shader also has to pass it.
+set(SHADER_TOOLS_THIRDPARTY "${REPOSITORY_ROOT}/tools/XShaderRecomp/thirdparty")
+
+android_test_executable(spirv_lower_tool SOURCES
+    spirv_lower_tool.cpp
+    "${GAME_ROOT}/gpu/spirv_int64_lowering.cpp"
+)
+
+set(shader_lowering_command
+    Python3::Interpreter "${CMAKE_CURRENT_SOURCE_DIR}/spirv_lowering_test.py" $<TARGET_FILE:spirv_lower_tool>)
+
+# The shader cache is unpacked the way gpu/video.cpp unpacks it. Not code under test, so
+# without the warnings and sanitizers.
+if (EXISTS "${SHADER_TOOLS_THIRDPARTY}/smol-v/source/smolv.cpp" AND EXISTS "${SHADER_TOOLS_THIRDPARTY}/zstd/lib/zstd.h")
+    file(GLOB zstd_sources
+        "${SHADER_TOOLS_THIRDPARTY}/zstd/lib/common/*.c"
+        "${SHADER_TOOLS_THIRDPARTY}/zstd/lib/decompress/*.c"
+    )
+    add_executable(shader_cache_dump
+        shader_cache_dump.cpp
+        "${REPOSITORY_ROOT}/ShadowRecompLib/shader/shader_cache.cpp"
+        "${SHADER_TOOLS_THIRDPARTY}/smol-v/source/smolv.cpp"
+        ${zstd_sources}
+    )
+    target_include_directories(shader_cache_dump PRIVATE
+        "${REPOSITORY_ROOT}/ShadowRecompLib"
+        "${SHADER_TOOLS_THIRDPARTY}/smol-v/source"
+        "${SHADER_TOOLS_THIRDPARTY}/zstd/lib"
+    )
+    target_compile_definitions(shader_cache_dump PRIVATE ZSTD_DISABLE_ASM)
+    target_compile_options(shader_cache_dump PRIVATE -w "$<$<COMPILE_LANGUAGE:CXX>:SHELL:-include cstddef -include cstdint>")
+    list(APPEND shader_lowering_command $<TARGET_FILE:shader_cache_dump>)
+else()
+    message(STATUS "tools/XShaderRecomp is not checked out with its submodules: the shaders of the shader cache are not tested.")
+endif()
+
+add_test(NAME shader_lowering COMMAND ${shader_lowering_command} --summary "${CMAKE_CURRENT_BINARY_DIR}/shader_lowering.summary")
+
+# gpu/vulkan_int64_lowering.cpp, which puts the rewrite between the game and the driver,
+# against a stand-in driver that records what it is handed.
+android_test_executable(shader_rewrite_test SOURCES
+    shader_rewrite_test.cpp
+    "${GAME_ROOT}/gpu/vulkan_int64_lowering.cpp"
+    "${GAME_ROOT}/gpu/spirv_int64_lowering.cpp"
+)
+target_include_directories(shader_rewrite_test PRIVATE "${VOLK_INCLUDE}" "${VULKAN_HEADERS_INCLUDE}")
+target_link_libraries(shader_rewrite_test PRIVATE Threads::Threads)
+add_test(NAME shader_lowering_driver_hook COMMAND shader_rewrite_test)
+
+# Rewritten shaders, executed: compute shaders run on whatever Vulkan driver the machine
+# has (Mesa's lavapipe will do: apt install mesa-vulkan-drivers libvulkan1), or on the
+# library named by the environment variable VULKAN_LIBRARY. Skipped without one.
+# Without AddressSanitizer, which a driver loaded into the process does not go well with.
+android_test_executable(vulkan_compute_harness NO_ADDRESS_SANITIZER SOURCES
+    vulkan_compute_harness.cpp
+    "${VOLK_INCLUDE}/volk.c"
+)
+set_source_files_properties("${VOLK_INCLUDE}/volk.c" PROPERTIES COMPILE_OPTIONS "-w")
+target_compile_definitions(vulkan_compute_harness PRIVATE VK_NO_PROTOTYPES)
+target_include_directories(vulkan_compute_harness PRIVATE "${VOLK_INCLUDE}" "${VULKAN_HEADERS_INCLUDE}")
+target_link_libraries(vulkan_compute_harness PRIVATE ${CMAKE_DL_LIBS})
+add_test(NAME shader_execution COMMAND Python3::Interpreter "${CMAKE_CURRENT_SOURCE_DIR}/shader_execution_test.py"
+    $<TARGET_FILE:spirv_lower_tool> $<TARGET_FILE:vulkan_compute_harness> --summary "${CMAKE_CURRENT_BINARY_DIR}/shader_execution.summary")
+set_tests_properties(shader_execution PROPERTIES SKIP_RETURN_CODE 77)
+set_tests_properties(shader_lowering shader_execution PROPERTIES ENVIRONMENT "PYTHONDONTWRITEBYTECODE=1")
 
 # --- Build tools (Python) ---------------------------------------------------------------
 # fetch-xbe.py gets default.xbe out of a disc image, an archive, a folder or a link;

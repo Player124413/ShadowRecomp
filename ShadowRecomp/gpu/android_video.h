@@ -53,6 +53,13 @@ namespace AndroidVideo
     bool CheckDeviceRequirements(plume::RenderInterface* renderInterface);
     const std::string& GetMissingDeviceFeature();
 
+    // Call after the device was created and before the first shader is. On a driver
+    // without 64-bit integers in shaders, makes every shader reach it rewritten to do
+    // without them (see gpu/vulkan_int64_lowering.h), and says so in the log.
+    // Video.ShadersWithoutInt64 = true in config.toml does the same on any driver, to tell
+    // a fault of the rewrite from one of a driver.
+    void InitShaderRewrite(plume::RenderDevice* device);
+
     // Whether the driver actually created a graphics pipeline. plume returns an object
     // either way and only writes the driver's error to stderr.
     bool IsPipelineUsable(const plume::RenderPipeline* pipeline);

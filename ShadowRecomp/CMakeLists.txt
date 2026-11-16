@@ -166,6 +166,8 @@ set(SHADOW_RECOMP_GPU_CXX_SOURCES
 if (ANDROID)
     list(APPEND SHADOW_RECOMP_GPU_CXX_SOURCES
         "gpu/android_video.cpp"
+        "gpu/spirv_int64_lowering.cpp"
+        "gpu/vulkan_int64_lowering.cpp"
         "gpu/vulkan_pipeline_cache.cpp"
     )
 endif()

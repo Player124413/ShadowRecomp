@@ -180,9 +180,29 @@ jobs:
         continue-on-error: true
         run: |-
           set -o pipefail
+
+          # For the tests of the shader rewrite (gpu/spirv_int64_lowering.cpp): a validator
+          # for its results, and a Vulkan driver that runs on the processor to execute them
+          # with. The tests do without either, and say so.
+          if ! { sudo apt-get update && sudo apt-get install -y --no-install-recommends spirv-tools libvulkan1 mesa-vulkan-drivers; } > "${RUNNER_TEMP}/logs/tests-packages.log" 2>&1; then
+            echo "::warning title=Tests::spirv-tools and Mesa's software Vulkan driver could not be installed; the shader tests run without them."
+          fi
+
           cmake -S ./tools/android/tests -B ./out/build/android-tests -G Ninja 2>&1 | tee "${RUNNER_TEMP}/logs/tests.log"
           cmake --build ./out/build/android-tests 2>&1 | tee -a "${RUNNER_TEMP}/logs/tests.log"
-          if ctest --test-dir ./out/build/android-tests --output-on-failure 2>&1 | tee -a "${RUNNER_TEMP}/logs/tests.log"; then
+
+          status=0
+          ctest --test-dir ./out/build/android-tests --output-on-failure 2>&1 | tee -a "${RUNNER_TEMP}/logs/tests.log" || status=$?
+
+          # What the shader tests covered, which depends on what the machine has.
+          for summary in shader_lowering shader_execution; do
+            file="./out/build/android-tests/${summary}.summary"
+            if [ -f "${file}" ]; then
+              echo "::notice title=Shader rewrite::$(head -c 1200 "${file}" | tr '\n' ' ')"
+            fi
+          done
+
+          if [ "${status}" -eq 0 ]; then
             echo "::notice title=Tests::$(grep -E 'tests passed' "${RUNNER_TEMP}/logs/tests.log" | tail -n 1)"
             touch "${RUNNER_TEMP}/logs/tests.ok"
           else

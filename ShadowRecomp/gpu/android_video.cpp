@@ -11,6 +11,7 @@
 
 #include <plume_vulkan.h>
 
+#include "vulkan_int64_lowering.h"
 #include "vulkan_pipeline_cache.h"
 #include "vulkan_requirements.h"
 
@@ -182,6 +183,31 @@ namespace AndroidVideo
         VulkanPipelineCache::Save();
     }
 
+    static bool s_shadersRewritten = false; // Written once, before any other thread creates shaders.
+
+    void InitShaderRewrite(RenderDevice* device)
+    {
+        // Asked of the device plume settled on. plume enables every feature a driver has.
+        VkPhysicalDeviceFeatures features = {};
+        vkGetPhysicalDeviceFeatures(static_cast<VulkanDevice*>(device)->physicalDevice, &features);
+
+        if (features.shaderInt64 && !Config::ShadersWithoutInt64)
+            return;
+
+        VulkanInt64Lowering::Install();
+        s_shadersRewritten = true;
+
+        if (features.shaderInt64)
+        {
+            LOGN("Shaders: rewritten to do without 64-bit integers, as Video.ShadersWithoutInt64 in config.toml asks. This driver has them.");
+        }
+        else
+        {
+            LOGN("Shaders: this graphics driver has no 64-bit integers in shaders (shaderInt64). "
+                 "Every shader is rewritten to do without them before the driver gets it.");
+        }
+    }
+
     void OnCachedPipelinesCreated()
     {
         // The data of the earlier run went into all of these pipelines.
@@ -192,7 +218,16 @@ namespace AndroidVideo
         // are no longer part of the startup.
         static std::atomic<bool> s_first{ true };
         if (s_first.exchange(false))
+        {
             os::android::LogStartupEvent("pipelines of the caches created");
+
+            if (s_shadersRewritten)
+            {
+                const VulkanInt64Lowering::Counts counts = VulkanInt64Lowering::GetCounts();
+                LOGFN("Shaders: {} rewritten without 64-bit integers so far ({} of them refused by the driver), {} had none, "
+                      "{} could not be rewritten.", counts.rewritten, counts.refused, counts.unchanged, counts.failed);
+            }
+        }
     }
 
     static std::string s_missingDeviceFeature;

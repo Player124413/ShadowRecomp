@@ -102,20 +102,27 @@ int main()
     missing = FindMissingFeature(report);
     Check(missing == "buffer device address (this driver lacks bufferDeviceAddress)", "nor is a newer version without the feature", missing);
 
-    // 64-bit integers.
-    report = Complete(1, 2);
+    // 64-bit integers are not required: the shaders are rewritten for a driver without.
+    report = Complete(1, 1);
     report.shaderInt64 = false;
     missing = FindMissingFeature(report);
-    Check(missing == "64-bit integers in shaders (this driver lacks shaderInt64)", "a driver without shaderInt64 is turned down", missing);
+    Check(missing.empty(), "Vulkan 1.1 without shaderInt64 is accepted", missing);
+
+    report = Complete(1, 3);
+    report.shaderInt64 = false;
+    missing = FindMissingFeature(report);
+    Check(missing.empty(), "and so is a newer version without it", missing);
 
     // Everything that is missing is named at once.
     report = DeviceReport{};
     report.apiVersion = MakeVersion(1, 1);
     missing = FindMissingFeature(report);
     Check(missing == "descriptor indexing (this Vulkan 1.1 driver has no VK_EXT_descriptor_indexing); "
-                     "buffer device address (this Vulkan 1.1 driver has no VK_KHR_buffer_device_address); "
-                     "64-bit integers in shaders (this driver lacks shaderInt64)",
-        "a bare Vulkan 1.1 driver is told all three", missing);
+                     "buffer device address (this Vulkan 1.1 driver has no VK_KHR_buffer_device_address)",
+        "a bare Vulkan 1.1 driver is told both", missing);
+
+    report.shaderInt64 = true;
+    Check(FindMissingFeature(report) == missing, "which shaderInt64 does not make up for");
 
     printf("%d checks, %d failures\n", g_checks, g_failures);
     return g_failures != 0;
