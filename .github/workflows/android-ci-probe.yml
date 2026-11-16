@@ -1,0 +1,20 @@
+# Temporary: checks that Actions runs on this branch and reports the runner environment.
+name: android-ci-probe
+on:
+  push:
+    branches: ['arena/54f59919-shadowrecomp']
+permissions:
+  contents: read
+jobs:
+  probe:
+    runs-on: ubuntu-26.04
+    steps:
+      - name: Environment
+        run: |-
+          note() { echo "::notice title=$1::$(printf '%s' "$2" | tr '\n' '|' | cut -c1-900)"; }
+          note os "$(. /etc/os-release; echo "$PRETTY_NAME"; uname -r; nproc; free -g | sed -n 2p)"
+          note disk "$(df -h / /mnt 2>&1 | tail -n +2)"
+          note android "$(echo "ANDROID_HOME=$ANDROID_HOME ANDROID_NDK_HOME=$ANDROID_NDK_HOME"; ls "$ANDROID_HOME/ndk" 2>&1; ls "$ANDROID_HOME/platforms" 2>&1 | tr '\n' ' '; echo; ls "$ANDROID_HOME/build-tools" 2>&1 | tr '\n' ' '; echo; ls "$ANDROID_HOME/cmdline-tools" 2>&1 | tr '\n' ' ')"
+          note tools "$(cmake --version | head -1; ninja --version 2>&1 | head -1; python3 --version; java -version 2>&1 | head -1; echo "JAVA_HOME_17_X64=$JAVA_HOME_17_X64 JAVA_HOME_21_X64=$JAVA_HOME_21_X64"; cargo --version 2>&1 | head -1; gcc --version | head -1; clang --version 2>&1 | head -1)"
+          note archive "$(for t in 7z 7zz 7za unrar unzip xxhsum xxh64sum curl wget gh aria2c megatools megadl; do printf '%s=%s ' "$t" "$(command -v $t || echo -)"; done; python3 -c 'import xxhash' 2>&1 | tail -1; pip --version 2>&1 | cut -c1-60)"
+          note ccache "$(command -v ccache || echo no-ccache; gradle --version 2>&1 | grep -m1 Gradle)"
