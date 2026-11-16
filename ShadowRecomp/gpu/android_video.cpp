@@ -213,28 +213,49 @@ namespace AndroidVideo
         {
             if (strcmp(extensions[i].extensionName, VK_EXT_DESCRIPTOR_INDEXING_EXTENSION_NAME) == 0)
                 report.descriptorIndexingExtension = true;
+            else if (strcmp(extensions[i].extensionName, VK_KHR_BUFFER_DEVICE_ADDRESS_EXTENSION_NAME) == 0)
+                report.bufferDeviceAddressExtension = true;
         }
 
-        // vkGetPhysicalDeviceFeatures2 came with Vulkan 1.1, and the driver only knows the
-        // structure of the features where it has the extension or Vulkan 1.2.
-        const bool canAsk = properties.apiVersion >= VulkanRequirements::MakeVersion(1, 1) && vkGetPhysicalDeviceFeatures2 != nullptr &&
-            (report.descriptorIndexingExtension || properties.apiVersion >= VulkanRequirements::MakeVersion(1, 2));
+        // vkGetPhysicalDeviceFeatures2 came with Vulkan 1.1.
+        if (properties.apiVersion < VulkanRequirements::MakeVersion(1, 1) || vkGetPhysicalDeviceFeatures2 == nullptr)
+            return report;
 
-        if (canAsk)
+        // A driver only knows the structure of a feature set where it has the extension or
+        // Vulkan 1.2, so it is only handed the ones it knows.
+        const bool atLeast12 = properties.apiVersion >= VulkanRequirements::MakeVersion(1, 2);
+
+        VkPhysicalDeviceFeatures2 features = {};
+        features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
+
+        VkPhysicalDeviceDescriptorIndexingFeatures indexing = {};
+        indexing.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_INDEXING_FEATURES;
+        if (report.descriptorIndexingExtension || atLeast12)
         {
-            VkPhysicalDeviceDescriptorIndexingFeatures indexing = {};
-            indexing.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_INDEXING_FEATURES;
-
-            VkPhysicalDeviceFeatures2 features = {};
-            features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
+            indexing.pNext = features.pNext;
             features.pNext = &indexing;
-            vkGetPhysicalDeviceFeatures2(physicalDevice, &features);
-
-            report.featuresQueried = true;
-            report.runtimeDescriptorArray = indexing.runtimeDescriptorArray;
-            report.descriptorBindingPartiallyBound = indexing.descriptorBindingPartiallyBound;
-            report.descriptorBindingVariableDescriptorCount = indexing.descriptorBindingVariableDescriptorCount;
         }
+
+        VkPhysicalDeviceBufferDeviceAddressFeatures deviceAddress = {};
+        deviceAddress.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_BUFFER_DEVICE_ADDRESS_FEATURES;
+        if (report.bufferDeviceAddressExtension || atLeast12)
+        {
+            deviceAddress.pNext = features.pNext;
+            features.pNext = &deviceAddress;
+        }
+
+        vkGetPhysicalDeviceFeatures2(physicalDevice, &features);
+
+        report.shaderInt64 = features.features.shaderInt64;
+        report.runtimeDescriptorArray = indexing.runtimeDescriptorArray;
+        report.descriptorBindingPartiallyBound = indexing.descriptorBindingPartiallyBound;
+        report.descriptorBindingVariableDescriptorCount = indexing.descriptorBindingVariableDescriptorCount;
+        report.bufferDeviceAddress = deviceAddress.bufferDeviceAddress;
+
+        // Not needed, but the first thing to look at when a driver refuses a pipeline.
+        LOGFN("Vulkan device \"{}\": depthClamp {}, shaderClipDistance {}, textureCompressionBC {}.", properties.deviceName,
+            features.features.depthClamp ? "yes" : "no", features.features.shaderClipDistance ? "yes" : "no",
+            features.features.textureCompressionBC ? "yes" : "no");
 
         return report;
     }
@@ -264,21 +285,37 @@ namespace AndroidVideo
             const VulkanRequirements::DeviceReport report = QueryDeviceRequirements(devices[i], properties);
             missing = VulkanRequirements::FindMissingFeature(report);
 
-            LOGFN("Vulkan device \"{}\": Vulkan {}.{}, VK_EXT_descriptor_indexing {}, runtimeDescriptorArray {}, descriptorBindingPartiallyBound {}, descriptorBindingVariableDescriptorCount {}.",
+            const auto yesNo = [](bool value) { return value ? "yes" : "no"; };
+            const auto offered = [](bool value) { return value ? "offered" : "not offered"; };
+
+            LOGFN("Vulkan device \"{}\": Vulkan {}.{}; VK_EXT_descriptor_indexing {} (runtimeDescriptorArray {}, descriptorBindingPartiallyBound {}, "
+                  "descriptorBindingVariableDescriptorCount {}); VK_KHR_buffer_device_address {} (bufferDeviceAddress {}); shaderInt64 {}.",
                 properties.deviceName, VulkanRequirements::FormatVersion(properties.apiVersion), properties.apiVersion & 0xFFF,
-                report.descriptorIndexingExtension ? "offered" : "not offered",
-                report.runtimeDescriptorArray ? "yes" : "no",
-                report.descriptorBindingPartiallyBound ? "yes" : "no",
-                report.descriptorBindingVariableDescriptorCount ? "yes" : "no");
+                offered(report.descriptorIndexingExtension), yesNo(report.runtimeDescriptorArray), yesNo(report.descriptorBindingPartiallyBound),
+                yesNo(report.descriptorBindingVariableDescriptorCount),
+                offered(report.bufferDeviceAddressExtension), yesNo(report.bufferDeviceAddress), yesNo(report.shaderInt64));
 
             if (missing.empty())
+            {
+                // The renderer calls this command by the name it has from Vulkan 1.2 on. An
+                // older driver only has it under the name of the extension.
+                if (properties.apiVersion < VulkanRequirements::MakeVersion(1, 2) && vkGetBufferDeviceAddressKHR != nullptr)
+                    vkGetBufferDeviceAddress = vkGetBufferDeviceAddressKHR;
+
                 return true;
+            }
 
             LOGFN_ERROR("This Vulkan driver cannot run the game. It lacks: {}.", missing);
         }
 
         s_missingDeviceFeature = missing;
         return false;
+    }
+
+    bool IsPipelineUsable(const RenderPipeline* pipeline)
+    {
+        // plume hands out a pipeline object whether or not the driver created the pipeline.
+        return pipeline != nullptr && static_cast<const VulkanGraphicsPipeline*>(pipeline)->vk != VK_NULL_HANDLE;
     }
 
     const std::string& GetMissingDeviceFeature()

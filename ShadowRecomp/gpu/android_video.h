@@ -17,6 +17,7 @@ namespace plume
 {
     struct RenderDevice;
     struct RenderInterface;
+    struct RenderPipeline;
     struct RenderSwapChain;
 }
 
@@ -51,6 +52,10 @@ namespace AndroidVideo
     // message the player gets instead of a renderer that fails further down the line.
     bool CheckDeviceRequirements(plume::RenderInterface* renderInterface);
     const std::string& GetMissingDeviceFeature();
+
+    // Whether the driver actually created a graphics pipeline. plume returns an object
+    // either way and only writes the driver's error to stderr.
+    bool IsPipelineUsable(const plume::RenderPipeline* pipeline);
 
     // Writes to the log which of the texture formats the renderer creates this GPU driver
     // supports. Nothing is enforced: unlike on desktop these vary between mobile GPUs, and

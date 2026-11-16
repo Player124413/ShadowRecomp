@@ -19,8 +19,11 @@ settings.
 
 - A 64-bit ARM (arm64-v8a) device with Android 10 or newer.
 - A GPU with a Vulkan 1.1 or newer driver that supports descriptor indexing
-  (`VK_EXT_descriptor_indexing`, part of Vulkan 1.2). The game checks this when it
-  starts and says what is missing if the driver will not do.
+  (`VK_EXT_descriptor_indexing`), buffer device address
+  (`VK_KHR_buffer_device_address`) and 64-bit integers in shaders. The first two are
+  optional parts of Vulkan 1.2; a Vulkan 1.1 driver has them only as extensions, and not
+  every one does. The game checks all of this when it starts and names what is missing
+  if the driver will not do.
     - Qualcomm Adreno 6xx and newer: the app carries its own Mesa Turnip drivers, so an
       outdated system driver is not a problem.
     - Mali, PowerVR, Xclipse, older Adreno: the system driver is used, or one you

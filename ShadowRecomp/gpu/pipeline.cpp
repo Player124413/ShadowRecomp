@@ -11,6 +11,7 @@
 #ifdef __ANDROID__
 #include "android_video.h"
 #include <user/config.h>
+#include <atomic>
 #include <pthread.h>
 #include <sys/resource.h>
 #include <unistd.h>
@@ -333,11 +334,46 @@ static void CompileQueuedPipeline(QueuedPipeline& queued)
 	EnqueueAddPipeline(queued.hash, CreateGraphicsPipeline(queued.pipelineState));
 }
 
+#ifdef __ANDROID__
+// Pipelines the driver refused to create. Its own reason goes to stderr every time; which
+// pipelines they were is added for the first few, the rest are counted.
+static std::atomic<uint32_t> g_refusedPipelineCount{ 0 };
+
+static void ReportRefusedPipeline(const PipelineState& pipelineState)
+{
+	constexpr uint32_t LISTED = 8;
+
+	const uint32_t count = ++g_refusedPipelineCount;
+	if (count > LISTED)
+		return;
+
+	PipelineCacheEntry entry;
+	if (BuildPipelineCacheEntry(pipelineState, entry))
+	{
+		LOGFN_ERROR("The graphics driver could not create pipeline {:016X}: vertex shader mode {}, vertex shader {:016X}, pixel shader {:016X}{}, "
+			"render target format {}, depth format {}, {} sample(s).",
+			uint64_t(ComputePipelineEntryHash(entry)), uint32_t(entry.vertexShaderMode), uint64_t(entry.vertexShaderHash), uint64_t(entry.pixelShaderHash),
+			entry.isFixedFunctionPS ? " (fixed function)" : "", uint32_t(entry.renderTargetFormat), uint32_t(entry.depthStencilFormat),
+			uint32_t(entry.sampleCount));
+	}
+	else
+	{
+		LOGN_ERROR("The graphics driver could not create a pipeline.");
+	}
+
+	if (count == LISTED)
+		LOGN_ERROR("Further pipelines the driver refuses are counted, not listed.");
+}
+#endif
+
 static void OnQueuedPipelinesCompiled(uint32_t count, double milliseconds)
 {
 	LOGFN("PipelineCache: Background threads compiled {} pipelines in {:.2f} ms", count, milliseconds);
 
 #ifdef __ANDROID__
+	if (const uint32_t refused = g_refusedPipelineCount.load())
+		LOGFN_ERROR("PipelineCache: The graphics driver has refused {} pipelines so far.", refused);
+
 	AndroidVideo::OnCachedPipelinesCreated();
 #endif
 }
@@ -631,6 +667,11 @@ std::unique_ptr<RenderPipeline> CreateGraphicsPipeline(const PipelineState& pipe
 	desc.inputSlotsCount = inputSlotCount;
 
 	auto pipeline = Video::GetRenderDevice()->createGraphicsPipeline(desc);
+
+#ifdef __ANDROID__
+	if (!AndroidVideo::IsPipelineUsable(pipeline.get()))
+		ReportRefusedPipeline(pipelineState);
+#endif
 
 	return pipeline;
 }

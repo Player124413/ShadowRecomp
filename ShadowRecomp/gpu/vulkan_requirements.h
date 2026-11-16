@@ -5,24 +5,35 @@
 
 // What the renderer cannot do without, checked against what a Vulkan driver reports.
 //
-// The renderer keeps all textures and all samplers in two large descriptor arrays that the
-// shaders index at run time. That takes the descriptor indexing features named below: an
-// extension of Vulkan 1.1 (VK_EXT_descriptor_indexing), part of Vulkan 1.2, and optional in
-// both. Everything else the renderer uses is Vulkan 1.1 or an extension it can do without,
-// so the version of the driver does not matter beyond 1.1; these features do.
+// - Descriptor indexing. All textures and all samplers live in two large descriptor arrays
+//   that the shaders index at run time.
+// - Buffer device address. The shaders do not get their constants through descriptors:
+//   they are handed the address of the buffer that holds them and read from it
+//   (vk::RawBufferLoad, see gpu/shader/shader_common.h).
+// - 64-bit integers in shaders, which those addresses are.
+//
+// The first two are extensions of Vulkan 1.1 (VK_EXT_descriptor_indexing,
+// VK_KHR_buffer_device_address) that became part of Vulkan 1.2, and are optional in both.
+// The renderer uses no command newer than Vulkan 1.1 otherwise, so it is these features
+// that decide whether a driver will do, not its version.
 namespace VulkanRequirements
 {
     struct DeviceReport
     {
-        uint32_t apiVersion = 0;                  // VkPhysicalDeviceProperties::apiVersion.
-        bool descriptorIndexingExtension = false; // The driver offers VK_EXT_descriptor_indexing.
+        uint32_t apiVersion = 0; // VkPhysicalDeviceProperties::apiVersion.
 
-        // Whether the driver could be asked for the features at all: only where it has the
-        // extension or Vulkan 1.2. The features are false otherwise.
-        bool featuresQueried = false;
+        bool shaderInt64 = false; // VkPhysicalDeviceFeatures::shaderInt64.
+
+        // Whether the driver offers the extension, and what it says about its features. It
+        // can only be asked about them where it has the extension or Vulkan 1.2; they stay
+        // false otherwise.
+        bool descriptorIndexingExtension = false;
         bool runtimeDescriptorArray = false;
         bool descriptorBindingPartiallyBound = false;
         bool descriptorBindingVariableDescriptorCount = false;
+
+        bool bufferDeviceAddressExtension = false;
+        bool bufferDeviceAddress = false;
     };
 
     inline constexpr uint32_t MakeVersion(uint32_t major, uint32_t minor)
@@ -36,29 +47,52 @@ namespace VulkanRequirements
     }
 
     // Returns what a device lacks to run the game, in words for the log and for the message
-    // the player gets, or an empty string if it lacks nothing.
+    // the player gets, or an empty string if it lacks nothing. Everything that is missing
+    // is named, not just the first thing found.
     inline std::string FindMissingFeature(const DeviceReport& report)
     {
         if (report.apiVersion < MakeVersion(1, 1))
             return "Vulkan 1.1 (this driver supports Vulkan " + FormatVersion(report.apiVersion) + ")";
 
-        if (!report.featuresQueried)
-            return "descriptor indexing (this Vulkan " + FormatVersion(report.apiVersion) + " driver has no VK_EXT_descriptor_indexing)";
+        // A driver older than 1.2 has a feature of 1.2 only through the extension.
+        const bool before12 = report.apiVersion < MakeVersion(1, 2);
+        const std::string driver = "this Vulkan " + FormatVersion(report.apiVersion) + " driver";
 
         std::string missing;
-        const auto require = [&missing](bool supported, const char* name)
+        const auto add = [&missing](const std::string& what)
         {
-            if (!supported)
-                missing += (missing.empty() ? "" : ", ") + std::string(name);
+            missing += (missing.empty() ? "" : "; ") + what;
         };
 
-        require(report.runtimeDescriptorArray, "runtimeDescriptorArray");
-        require(report.descriptorBindingPartiallyBound, "descriptorBindingPartiallyBound");
-        require(report.descriptorBindingVariableDescriptorCount, "descriptorBindingVariableDescriptorCount");
+        if (before12 && !report.descriptorIndexingExtension)
+        {
+            add("descriptor indexing (" + driver + " has no VK_EXT_descriptor_indexing)");
+        }
+        else
+        {
+            std::string features;
+            const auto require = [&features](bool supported, const char* name)
+            {
+                if (!supported)
+                    features += (features.empty() ? "" : ", ") + std::string(name);
+            };
 
-        if (!missing.empty())
-            return "descriptor indexing (this driver lacks " + missing + ")";
+            require(report.runtimeDescriptorArray, "runtimeDescriptorArray");
+            require(report.descriptorBindingPartiallyBound, "descriptorBindingPartiallyBound");
+            require(report.descriptorBindingVariableDescriptorCount, "descriptorBindingVariableDescriptorCount");
 
-        return {};
+            if (!features.empty())
+                add("descriptor indexing (this driver lacks " + features + ")");
+        }
+
+        if (before12 && !report.bufferDeviceAddressExtension)
+            add("buffer device address (" + driver + " has no VK_KHR_buffer_device_address)");
+        else if (!report.bufferDeviceAddress)
+            add("buffer device address (this driver lacks bufferDeviceAddress)");
+
+        if (!report.shaderInt64)
+            add("64-bit integers in shaders (this driver lacks shaderInt64)");
+
+        return missing;
     }
 }

@@ -2177,6 +2177,7 @@ static void CreateImGuiBackend()
 	pipelineDesc.inputElementsCount = std::size(inputElements);
 	pipelineDesc.inputSlots = &inputSlot;
 	pipelineDesc.inputSlotsCount = 1;
+	pipelineDesc.depthClipEnabled = true; // See g_copyDepthPipeline.
 	g_imPipeline = g_device->createGraphicsPipeline(pipelineDesc);
 
 	pipelineDesc.renderTargetBlend[0].dstBlend = RenderBlend::ONE;
@@ -2917,6 +2918,11 @@ bool Video::CreateHostDevice(const char* sdlVideoDriver, bool graphicsApiRetry)
 	desc.depthEnabled = true;
 	desc.depthWriteEnabled = true;
 	desc.depthTargetFormat = DepthStencilFormat;
+
+	// Left at its default this asks Vulkan for depth clamping, an optional feature that many
+	// mobile GPUs do not have and whose pipelines their drivers then refuse. These passes
+	// draw at depth 0, inside the range, so they look the same without it.
+	desc.depthClipEnabled = true;
 	g_copyDepthPipeline = g_device->createGraphicsPipeline(desc);
 	STARTUP_PHASE("descriptor sets and copy pipeline created");
 
@@ -2932,7 +2938,35 @@ bool Video::CreateHostDevice(const char* sdlVideoDriver, bool graphicsApiRetry)
 	desc.renderTargetFormat[0] = SWAPCHAIN_FORMAT; // The presentation pass draws to the swap chain image.
 	desc.renderTargetBlend[0] = RenderBlendDesc::Copy();
 	desc.renderTargetCount = 1;
+	desc.depthClipEnabled = true; // See g_copyDepthPipeline.
 	g_gammaCorrectionPipeline = g_device->createGraphicsPipeline(desc);
+
+#ifdef __ANDROID__
+	// Without these four not one frame can be shown. A driver that refuses one is reported
+	// here, by the name of the pipeline, instead of crashing where it is first used.
+	{
+		const std::pair<const char*, const RenderPipeline*> startupPipelines[] =
+		{
+			{ "depth copy", g_copyDepthPipeline.get() },
+			{ "interface", g_imPipeline.get() },
+			{ "additive interface", g_imAdditivePipeline.get() },
+			{ "presentation", g_gammaCorrectionPipeline.get() },
+		};
+
+		bool usable = true;
+		for (const auto& [name, pipeline] : startupPipelines)
+		{
+			if (!AndroidVideo::IsPipelineUsable(pipeline))
+			{
+				LOGFN_ERROR("The graphics driver could not create the {} pipeline.", name);
+				usable = false;
+			}
+		}
+
+		if (!usable)
+			return false;
+	}
+#endif
 
 	FixedFuncVS = CREATE_SHADER(FixedFunctionVertexShader);
 	FixedFuncPS = CREATE_SHADER(FixedFunctionPixelShader);
