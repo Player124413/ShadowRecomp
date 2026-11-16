@@ -485,5 +485,170 @@ check(r["rc"] == 0 and r["custom"] == "0", "no internal dir: system driver, no c
 d.internal = d.internal_backup
 d.close()
 
+# ---------------------------------------------------------------------------------------
+# The bundled drivers are compared with the APK only when one of the two may have changed.
+ALL_BUNDLED = (N_BUNDLED, N_VAUZI, N_A725, N_A8XX)
+
+def stamped(stamp="1700000000000-1000000-38000000", **kwargs):
+    device = Device(**kwargs)
+    device.extra_env["SHADOWRECOMP_APK_STAMP"] = stamp
+    return device
+
+def stamp_path(device):
+    return os.path.join(device.turnip, "bundled_drivers.stamp")
+
+def installed(device, name):
+    with open(os.path.join(device.turnip, name), "rb") as f:
+        return f.read()
+
+scenario("bundled drivers: compared once per APK")
+d = stamped()
+r = d.launch(AUTO)
+check(r["asset_opens"] == "4", f"first launch reads the four assets: {r['asset_opens']}")
+check(os.path.isfile(stamp_path(d)), "stamp written")
+lines = read(stamp_path(d)).splitlines()
+check(lines[0] == "apk=1700000000000-1000000-38000000", f"stamp names the APK: {lines[0]}")
+check([line.split("=")[0] for line in lines[1:]] == list(ALL_BUNDLED), "one line per bundled driver")
+check(all(line.split("=")[1].split(":")[0] == str(len("ELF:" + line.split("=")[0])) for line in lines[1:]), "with the size of each")
+r = d.launch(AUTO)
+check(r["asset_opens"] == "0", f"second launch does not read the APK: {r['asset_opens']}")
+check(r["custom"] == "1" and r["driver"] == N_BUNDLED, "and loads the same driver")
+check(r["log"].count("fingerprint") == 4 and "earlier launch" in r["log"], "the fingerprints are still in the log")
+check(d.launch(SYSTEM)["asset_opens"] == "0" and d.launch(VAUZI)["asset_opens"] == "0", "whatever driver is selected")
+check(not [f for f in os.listdir(d.turnip) if f.endswith(".tmp")], "no temp files left")
+# What the skip rests on: with an unchanged stamp the assets are not looked at at all.
+d.put_assets(b"-unseen")
+r = d.launch(AUTO)
+check(r["asset_opens"] == "0" and installed(d, N_BUNDLED) == b"ELF:" + N_BUNDLED.encode(), "same stamp: assets not consulted")
+# An update of the APK changes the stamp.
+d.put_assets(b"-v2")
+d.extra_env["SHADOWRECOMP_APK_STAMP"] = "1800000000000-1000001-38000001"
+r = d.launch(AUTO)
+check(r["asset_opens"] == "4", "new APK: compared again")
+check(all(installed(d, n) == b"ELF:" + n.encode() + b"-v2" for n in ALL_BUNDLED), "and every copy replaced")
+check(read(stamp_path(d)).startswith("apk=1800000000000-1000001-38000001\n"), "stamp follows")
+check(d.launch(AUTO)["asset_opens"] == "0", "then skipped again")
+d.close()
+
+scenario("bundled drivers: a copy that changed is restored")
+d = stamped()
+d.launch(AUTO)
+os.remove(os.path.join(d.turnip, N_VAUZI))
+r = d.launch(AUTO)
+check(r["asset_opens"] == "4" and installed(d, N_VAUZI) == b"ELF:" + N_VAUZI.encode(), "a deleted copy comes back")
+check(d.launch(AUTO)["asset_opens"] == "0", "and the stamp is valid again")
+with open(os.path.join(d.turnip, N_A725), "ab") as f: f.write(b"junk")
+r = d.launch(AUTO)
+check(r["asset_opens"] == "4" and installed(d, N_A725) == b"ELF:" + N_A725.encode(), "a copy of another size is replaced")
+os.remove(os.path.join(d.turnip, N_A8XX)); os.makedirs(os.path.join(d.turnip, N_A8XX))
+r = d.launch(SYSTEM)
+check(r["rc"] == 0 and r["asset_opens"] == "4", "a directory in place of a copy is not taken for one")
+check(not os.path.exists(stamp_path(d)), "and no stamp vouches for it")
+d.close()
+
+scenario("bundled drivers: damaged stamp")
+d = stamped()
+d.launch(AUTO)
+good = read(stamp_path(d))
+for label, text in (("empty", ""), ("garbage", "garbage"), ("only the APK line", good.splitlines()[0] + "\n"),
+                    ("another APK", good.replace("apk=1700000000000", "apk=1600000000000")),
+                    ("a driver missing", "\n".join(good.splitlines()[:-1]) + "\n"),
+                    ("drivers reordered", "\n".join([good.splitlines()[0]] + good.splitlines()[:0:-1]) + "\n"),
+                    ("trailing text", good + "extra\n"), ("no final newline", good[:-1]),
+                    ("wrong size", good.replace("=%d:" % len("ELF:" + N_VAUZI), "=1:")),
+                    ("bad number", good.replace("=%d:" % len("ELF:" + N_VAUZI), "=x:")),
+                    ("spaces", good.replace("=", " = ")), ("huge", good + "x" * 5000)):
+    with open(stamp_path(d), "w") as f: f.write(text)
+    r = d.launch(AUTO)
+    check(r["rc"] == 0 and r["asset_opens"] == "4", f"{label}: compared again ({r['asset_opens']})")
+    check(read(stamp_path(d)) == good, f"{label}: stamp rewritten")
+d.close()
+
+scenario("bundled drivers: imports force a comparison")
+d = stamped()
+d.launch(AUTO)
+# Same name and size as a bundled driver, other bytes: the size check alone would miss it.
+with open(os.path.join(d.imports, N_BUNDLED), "wb") as f: f.write(b"X" * len("ELF:" + N_BUNDLED))
+r = d.launch(AUTO)
+check(r["asset_opens"] == "4", "an import is followed by a comparison")
+check(installed(d, N_BUNDLED) == b"ELF:" + N_BUNDLED.encode(), "the bundled slot follows the APK")
+check(d.launch(AUTO)["asset_opens"] == "0", "one launch later it is skipped again")
+with open(os.path.join(d.imports, "broken.zip"), "wb") as f: f.write(b"not a zip")
+check(d.launch(AUTO)["asset_opens"] == "4", "a rejected import too")
+d.close()
+
+scenario("bundled drivers: no stamp without a usable APK stamp")
+d = Device()
+check(d.launch(AUTO)["asset_opens"] == "4" and d.launch(AUTO)["asset_opens"] == "4", "no APK stamp: compared on every launch")
+check(not os.path.exists(stamp_path(d)), "and no stamp file")
+for bad in ("", "two\nlines", "cr\rhere", "x" * 300):
+    d.extra_env["SHADOWRECOMP_APK_STAMP"] = bad
+    check(d.launch(AUTO)["asset_opens"] == "4" and not os.path.exists(stamp_path(d)), f"unusable APK stamp {bad[:10]!r} ignored")
+# The stamp appears with an update of the app: compared once more, then skipped.
+d.extra_env["SHADOWRECOMP_APK_STAMP"] = "5"
+check(d.launch(AUTO)["asset_opens"] == "4" and d.launch(AUTO)["asset_opens"] == "0", "skipping starts once there is one")
+# A stamp left by a launch that had one is not trusted by a launch that has none.
+del d.extra_env["SHADOWRECOMP_APK_STAMP"]
+check(d.launch(AUTO)["asset_opens"] == "4" and not os.path.exists(stamp_path(d)), "and stops without")
+d.close()
+
+scenario("bundled drivers: APK without them")
+d = stamped(assets=False)
+r = d.launch(AUTO, ok=False)
+check(r["custom"] == "0" and r["asset_opens"] == "4", "looked for once")
+check(read(stamp_path(d)).splitlines()[1:] == [n + "=-" for n in ALL_BUNDLED], "recorded as not shipped")
+check(d.launch(AUTO, ok=False)["asset_opens"] == "0", "not looked for again")
+# A copy left by an earlier APK that did ship drivers is neither required nor removed.
+with open(os.path.join(d.turnip, N_BUNDLED), "wb") as f: f.write(b"old")
+r = d.launch(BUNDLED)
+check(r["asset_opens"] == "0" and r["driver"] == N_BUNDLED, "a leftover copy stays usable")
+d.close()
+
+scenario("bundled drivers: unreadable asset, unwritable stamp")
+d = stamped()
+d.extra_env["TEST_ASSET_READ_FAILS"] = "1"
+r = d.launch(AUTO, ok=False)
+check(r["rc"] == 0 and r["custom"] == "0", "unreadable assets: system driver, no crash")
+check(not os.path.exists(stamp_path(d)), "nothing is recorded as compared")
+check("Failed to read the bundled Vulkan driver" in r["log"], "and the log says why")
+del d.extra_env["TEST_ASSET_READ_FAILS"]
+r = d.launch(AUTO)
+check(r["asset_opens"] == "4" and r["driver"] == N_BUNDLED and os.path.isfile(stamp_path(d)), "next launch provisions them")
+os.remove(stamp_path(d)); os.makedirs(stamp_path(d) + ".tmp")
+r = d.launch(AUTO)
+check(r["rc"] == 0 and r["driver"] == N_BUNDLED and not os.path.exists(stamp_path(d)), "stamp cannot be written: the launch is unaffected")
+check(d.launch(AUTO)["asset_opens"] == "4", "and the comparison simply runs again")
+d.close()
+
+scenario("bundled drivers: a failed startup has the copies compared again")
+d = stamped()
+d.launch(BUNDLED)
+# Damage the copy without changing its size, as a bad flash block would.
+with open(os.path.join(d.turnip, N_BUNDLED), "r+b") as f: f.write(b"BAD!")
+r = d.launch(BUNDLED, ok=False)
+check(r["asset_opens"] == "0" and os.path.isfile(stamp_path(d)), "the damage goes unnoticed while the stamp holds")
+r = d.launch(BUNDLED, ok=True)
+check(r["custom"] == "0" and r["asset_opens"] == "0", "recovery launch: system driver, drivers left alone")
+check(not os.path.exists(stamp_path(d)), "but the stamp is gone")
+r = d.launch(BUNDLED, ok=True)
+check(r["custom"] == "1" and r["asset_opens"] == "4", "the launch after compares")
+check(installed(d, N_BUNDLED) == b"ELF:" + N_BUNDLED.encode(), "and repairs the copy")
+d.close()
+
+scenario("readme is written only when it differs")
+d = Device()
+d.launch(AUTO)
+readme = os.path.join(d.imports, "readme.txt")
+media_readme = os.path.join(d.media, "driver_import", "readme.txt")
+before = (os.stat(readme).st_ino, os.stat(media_readme).st_ino)
+d.launch(AUTO)
+check((os.stat(readme).st_ino, os.stat(media_readme).st_ino) == before, "unchanged readme files are left alone")
+text = read(readme)
+with open(readme, "w") as f: f.write(text + "edited")
+with open(media_readme, "w") as f: f.write("")
+d.launch(AUTO)
+check(read(readme) == text and read(media_readme) != "", "changed and emptied ones are written again")
+d.close()
+
 print(f"{checks} checks, {failures} failures")
 sys.exit(1 if failures else 0)

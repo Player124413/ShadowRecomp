@@ -52,6 +52,21 @@ static constexpr const char *ADRENO_8XX_TU_DEBUG_PRESET = "sysmem,nobin";
 static constexpr const char *DEFAULT_DRIVER_NAME = "vulkan.unleashed26_1_wfm_a732.so";
 static constexpr const char *LAST_IMPORTED_DRIVER_FILE = "last_imported_driver.txt";
 static constexpr const char *VULKAN_STARTUP_STATE_FILE = "vulkan_startup_state.txt";
+static constexpr const char *BUNDLED_DRIVER_STAMP_FILE = "bundled_drivers.stamp";
+
+struct BundledDriver
+{
+    const char *name;  // File name in the internal "turnip/" directory.
+    const char *asset; // Path of the APK asset it is extracted from.
+};
+
+static constexpr BundledDriver BUNDLED_DRIVERS[] =
+{
+    { BUNDLED_DRIVER_NAME, BUNDLED_DRIVER_ASSET },
+    { VAUZI_710_DRIVER_NAME, VAUZI_710_DRIVER_ASSET },
+    { EXPERIMENTAL_A725_DRIVER_NAME, EXPERIMENTAL_A725_DRIVER_ASSET },
+    { ADRENO_8XX_DRIVER_NAME, ADRENO_8XX_DRIVER_ASSET },
+};
 
 enum class VulkanStartupPhase
 {
@@ -83,6 +98,10 @@ static EAndroidRenderMode g_configuredRenderMode = EAndroidRenderMode::Auto;
 // Result of the one custom-loader attempt of this process (see AndroidGetCustomVulkanLoader).
 static bool g_customLoaderResolved;
 static void *g_customLibVulkan;
+
+// Set when this launch wrote imported driver files into the "turnip/" directory, where they
+// may have replaced a bundled driver of the same name.
+static bool g_driverFilesImported;
 
 static std::string GetTurnipDir()
 {
@@ -534,27 +553,40 @@ static void WriteTextFileIfMissing(const std::filesystem::path &path, const char
 
 static void WriteTextFile(const std::filesystem::path &path, const char *contents)
 {
-    WriteWholeFile(path, contents, strlen(contents));
+    // Most callers write the same text on every launch; leave a file that already has it alone.
+    const size_t length = strlen(contents);
+    std::vector<uint8_t> current;
+    if (ReadWholeFile(path, current) && current.size() == length && memcmp(current.data(), contents, length) == 0)
+        return;
+
+    WriteWholeFile(path, contents, length);
 }
 
+enum class EAssetRead
+{
+    Ok,
+    Missing, // The APK has no such asset (or an empty one).
+    Failed,  // The asset exists but could not be read.
+};
+
 // Reads a file bundled in the APK assets (SDL routes relative paths to the asset manager).
-static bool ReadAssetFile(const char *assetPath, std::vector<uint8_t> &data)
+static EAssetRead ReadAssetFile(const char *assetPath, std::vector<uint8_t> &data)
 {
     SDL_IOStream *rw = SDL_IOFromFile(assetPath, "rb");
     if (rw == nullptr)
-        return false;
+        return EAssetRead::Missing;
 
     Sint64 size = SDL_GetIOSize(rw);
     if (size <= 0)
     {
         SDL_CloseIO(rw);
-        return false;
+        return size == 0 ? EAssetRead::Missing : EAssetRead::Failed;
     }
 
     data.resize(size_t(size));
     bool ok = SDL_ReadIO(rw, data.data(), data.size()) == size_t(size);
     SDL_CloseIO(rw);
-    return ok;
+    return ok ? EAssetRead::Ok : EAssetRead::Failed;
 }
 
 static uint64_t DriverFingerprint(const std::vector<uint8_t> &driver)
@@ -722,6 +754,9 @@ static void ScanDriverImportDir(const std::filesystem::path &importDir, const st
     {
         const std::string fileName = candidate.filename().string();
 
+        // Whatever comes of it, files in the driver directory may be replaced from here on.
+        g_driverFilesImported = true;
+
         std::filesystem::create_directories(installedDir, ec);
         std::filesystem::path source = installedDir / fileName;
         std::filesystem::rename(candidate, source, ec);
@@ -837,22 +872,46 @@ static void ProcessDriverImportDir(const std::filesystem::path &turnipDir)
     }
 }
 
-// Provision the app-owned bundled-driver slots. A different imported driver remains selected
-// through driver_name.txt, but both bundled slots follow APK updates byte-for-byte.
-static void InstallBundledDriverAsset(const std::filesystem::path &turnipDir,
-    const char *driverName, const char *assetName)
+// What an app-owned bundled-driver slot held when it was last compared with the APK.
+struct BundledDriverRecord
 {
-    std::filesystem::path driverPath = turnipDir / driverName;
+    bool inApk = false; // The APK ships this driver.
+    uint64_t size = 0;
+    uint64_t fingerprint = 0;
+};
+
+// Brings one app-owned bundled-driver slot up to date with the APK, byte for byte. A
+// different imported driver remains selected through driver_name.txt. Returns false if the
+// slot could not be brought up to date.
+static bool InstallBundledDriverAsset(const std::filesystem::path &turnipDir,
+    const BundledDriver &bundled, BundledDriverRecord &record)
+{
+    record = {};
+
+    std::filesystem::path driverPath = turnipDir / bundled.name;
 
     std::vector<uint8_t> driver;
-    if (!ReadAssetFile(assetName, driver))
+    switch (ReadAssetFile(bundled.asset, driver))
     {
-        // APK built without the bundled driver - nothing to provision.
-        return;
+        case EAssetRead::Ok:
+            break;
+
+        case EAssetRead::Missing:
+            // APK built without the bundled driver - nothing to provision.
+            return true;
+
+        case EAssetRead::Failed:
+        default:
+            LOGF_ERROR("Failed to read the bundled Vulkan driver {} from the APK.", bundled.name);
+            return false;
     }
 
+    record.inApk = true;
+    record.size = driver.size();
+    record.fingerprint = DriverFingerprint(driver);
+
     LOGF("Bundled Vulkan driver asset {}: {} bytes, fingerprint {:016x}.",
-        driverName, driver.size(), DriverFingerprint(driver));
+        bundled.name, driver.size(), record.fingerprint);
 
     std::vector<uint8_t> installedDriver;
     const bool alreadyInstalled = ReadWholeFile(driverPath, installedDriver) && installedDriver == driver;
@@ -861,19 +920,141 @@ static void InstallBundledDriverAsset(const std::filesystem::path &turnipDir,
         if (!WriteWholeFile(driverPath, driver.data(), driver.size()))
         {
             LOG_ERROR("Failed to extract the bundled Vulkan driver to internal storage.");
-            return;
+            return false;
         }
 
         LOGF("Updated bundled Vulkan driver at {}.", driverPath.string());
     }
+
+    return true;
+}
+
+// The comparison above reads all bundled drivers out of the APK and their copies from
+// internal storage: well over a hundred megabytes on every launch, before the game has
+// shown anything, to confirm what was already true the last time. Its outcome can only
+// change when the APK is replaced or a copy is, so it is written down together with the
+// stamp of the APK (see os::android::GetApkStamp) and the size of every copy:
+//
+//   apk=<stamp>
+//   <driver file name>=<size>:<fingerprint>     or "=-" for a driver the APK does not ship
+//
+// While the stamp still describes what is installed, the comparison is skipped.
+static std::string ComposeBundledDriverStamp(const char *apkStamp, const BundledDriverRecord *records)
+{
+    std::string stamp = fmt::format("apk={}\n", apkStamp);
+    for (size_t i = 0; i < std::size(BUNDLED_DRIVERS); i++)
+    {
+        if (records[i].inApk)
+            stamp += fmt::format("{}={}:{:016x}\n", BUNDLED_DRIVERS[i].name, records[i].size, records[i].fingerprint);
+        else
+            stamp += fmt::format("{}=-\n", BUNDLED_DRIVERS[i].name);
+    }
+
+    return stamp;
+}
+
+static bool ParseBundledDriverStamp(const std::string &stamp, BundledDriverRecord *records)
+{
+    // The first line holds the APK stamp; the caller checks it by composing the text again.
+    size_t lineEnd = stamp.find('\n');
+    for (size_t i = 0; i < std::size(BUNDLED_DRIVERS); i++)
+    {
+        if (lineEnd == std::string::npos)
+            return false;
+
+        const size_t lineStart = lineEnd + 1;
+        lineEnd = stamp.find('\n', lineStart);
+        if (lineEnd == std::string::npos)
+            return false;
+
+        const std::string line = stamp.substr(lineStart, lineEnd - lineStart);
+        const std::string key = std::string(BUNDLED_DRIVERS[i].name) + "=";
+        if (line.compare(0, key.size(), key) != 0)
+            return false;
+
+        const char *value = line.c_str() + key.size();
+        unsigned long long size = 0;
+        unsigned long long fingerprint = 0;
+        if (strcmp(value, "-") == 0)
+            records[i] = {};
+        else if (sscanf(value, "%llu:%llx", &size, &fingerprint) == 2)
+            records[i] = { true, uint64_t(size), uint64_t(fingerprint) };
+        else
+            return false;
+    }
+
+    return true;
+}
+
+// True if the stamp file describes this APK and every copy it lists is still in place.
+static bool BundledDriversAreCurrent(const std::filesystem::path &turnipDir, const char *apkStamp,
+    BundledDriverRecord *records)
+{
+    std::vector<uint8_t> contents;
+    if (!ReadWholeFile(turnipDir / BUNDLED_DRIVER_STAMP_FILE, contents) || contents.size() > 4096)
+        return false;
+
+    const std::string stamp(contents.begin(), contents.end());
+    if (!ParseBundledDriverStamp(stamp, records) || stamp != ComposeBundledDriverStamp(apkStamp, records))
+        return false;
+
+    for (size_t i = 0; i < std::size(BUNDLED_DRIVERS); i++)
+    {
+        if (!records[i].inApk)
+            continue;
+
+        struct stat info {};
+        if (stat((turnipDir / BUNDLED_DRIVERS[i].name).c_str(), &info) != 0 ||
+            !S_ISREG(info.st_mode) || uint64_t(info.st_size) != records[i].size)
+        {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+static void RemoveBundledDriverStamp(const std::filesystem::path &turnipDir)
+{
+    unlink((turnipDir / BUNDLED_DRIVER_STAMP_FILE).c_str());
 }
 
 static void InstallBundledDriversIfNeeded(const std::filesystem::path &turnipDir)
 {
-    InstallBundledDriverAsset(turnipDir, BUNDLED_DRIVER_NAME, BUNDLED_DRIVER_ASSET);
-    InstallBundledDriverAsset(turnipDir, VAUZI_710_DRIVER_NAME, VAUZI_710_DRIVER_ASSET);
-    InstallBundledDriverAsset(turnipDir, EXPERIMENTAL_A725_DRIVER_NAME, EXPERIMENTAL_A725_DRIVER_ASSET);
-    InstallBundledDriverAsset(turnipDir, ADRENO_8XX_DRIVER_NAME, ADRENO_8XX_DRIVER_ASSET);
+    // Without a usable stamp of the APK nothing can be skipped.
+    const char *apkStamp = os::android::GetApkStamp();
+    const bool hasApkStamp = apkStamp[0] != '\0' && strlen(apkStamp) < 256 && strpbrk(apkStamp, "\r\n") == nullptr;
+
+    BundledDriverRecord records[std::size(BUNDLED_DRIVERS)];
+
+    if (hasApkStamp && !g_driverFilesImported && BundledDriversAreCurrent(turnipDir, apkStamp, records))
+    {
+        for (size_t i = 0; i < std::size(BUNDLED_DRIVERS); i++)
+        {
+            if (records[i].inApk)
+            {
+                LOGF("Bundled Vulkan driver {}: {} bytes, fingerprint {:016x} (compared with this APK on an earlier launch).",
+                    BUNDLED_DRIVERS[i].name, records[i].size, records[i].fingerprint);
+            }
+        }
+    }
+    else
+    {
+        // The stamp goes first: should this launch end half-way, the next one must not find
+        // a stamp that vouches for files which were being replaced.
+        RemoveBundledDriverStamp(turnipDir);
+
+        bool upToDate = true;
+        for (size_t i = 0; i < std::size(BUNDLED_DRIVERS); i++)
+            upToDate = InstallBundledDriverAsset(turnipDir, BUNDLED_DRIVERS[i], records[i]) && upToDate;
+
+        if (upToDate && hasApkStamp)
+        {
+            const std::string stamp = ComposeBundledDriverStamp(apkStamp, records);
+            WriteWholeFile(turnipDir / BUNDLED_DRIVER_STAMP_FILE, stamp.data(), stamp.size());
+        }
+    }
+
     WriteTextFileIfMissing(turnipDir / "driver_name.txt", BUNDLED_DRIVER_NAME);
 }
 
@@ -1074,6 +1255,11 @@ static void *OpenCustomLibVulkan()
     // keeps the one-time fallback limited to the platform loader and deterministic Auto mode.
     if (g_forceSafeVulkanFallback)
     {
+        // Should the driver that failed be a damaged copy of a bundled one, the launch after
+        // this one compares the copies with the APK again and replaces it.
+        if (const std::string recoveryTurnipDir = GetTurnipDir(); !recoveryTurnipDir.empty())
+            RemoveBundledDriverStamp(recoveryTurnipDir);
+
         ApplyRenderMode(EAndroidRenderMode::Auto, false);
         LOGF_WARNING("Android Vulkan driver mode: System (boot recovery override; configured mode remains {}).",
             VulkanDriverName(g_configuredVulkanDriver));

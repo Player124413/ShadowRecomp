@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Scenario tests for logger_android.cpp: every run() is one app process."""
-import os, re, shutil, subprocess, sys, tempfile
+import os, re, shutil, subprocess, sys, tempfile, time
 
 if len(sys.argv) != 2:
     sys.exit("usage: %s <path to the harness executable>" % sys.argv[0])
@@ -14,11 +14,12 @@ def check(cond, what):
         failures += 1
         print(f"FAIL [{current}] {what}")
 
-def run(directory, mode, arg="", timeout=120):
+def run(directory, mode, arg="", timeout=120, extra_env=None):
     env = {"PATH": os.environ.get("PATH", ""), "SHADOWRECOMP_APP_VERSION": "1.2.3-test"}
     if directory is not None:
         env["SHADOWRECOMP_EXTERNAL_DIR"] = directory
         env["SHADOWRECOMP_INTERNAL_DIR"] = directory
+    env.update(extra_env or {})
     return subprocess.run([HARNESS, mode, arg], env=env, capture_output=True, text=True, timeout=timeout)
 
 def read(path):
@@ -114,6 +115,60 @@ lines = [l for l in log.splitlines() if "thread " in l and " line " in l]
 check(len(lines) == 16000, f"all lines present: {len(lines)}")
 check(all(re.fullmatch(r"\[ *\d+\.\d{3}\]\[t\d+\]\[\*\] thread \d line \d+", l) for l in lines), "no interleaving inside a line")
 shutil.rmtree(d)
+
+current = "line lengths"
+d = tempfile.mkdtemp(prefix="logtest_")
+p = run(d, "lengths")
+check(p.returncode == 0, f"exit code {p.returncode} {p.stderr[-300:]}")
+log = read(os.path.join(d, "log.txt"))
+lines = log.splitlines()
+for n in range(900, 1101):
+    text = "<" + chr(ord("a") + n % 26) * n + ">"
+    wanted = ("[function_name] " if n % 2 else " ") + text
+    found = [l for l in lines if l.endswith(wanted) and re.fullmatch(r"\[ *\d+\.\d{3}\]\[t\d+\]", l[:-len(wanted)])]
+    if len(found) != 1:
+        check(False, f"a {n} character message is written whole, once: {len(found)}")
+        break
+else:
+    check(True, "messages around the buffer size are written whole")
+check(any(re.fullmatch(r"\[ *\d+\.\d{3}\]\[t\d+\] ", l) for l in lines), "empty message")
+check(any(re.fullmatch(r"\[ *\d+\.\d{3}\]\[t\d+\]\[warn\]\[f\] ", l) for l in lines), "empty message with tag and function")
+check(any(l.endswith("[error][big] <" + "z" * 200000 + ">") for l in lines), "a very long message")
+check(log.endswith("\n") and "\x00" not in log, "no stray bytes")
+shutil.rmtree(d)
+
+current = "startup timeline"
+now_ms = int(time.clock_gettime(time.CLOCK_MONOTONIC) * 1000)
+d = tempfile.mkdtemp(prefix="logtest_")
+p = run(d, "startup", extra_env={"SHADOWRECOMP_LAUNCH_UPTIME_MS": str(now_ms - 400)})
+check(p.returncode == 0, f"exit code {p.returncode} {p.stderr[-300:]}")
+lines = [l for l in read(os.path.join(d, "log.txt")).splitlines() if "[startup]" in l]
+check(len(lines) == 5, f"one line per phase and event: {len(lines)}")
+first = re.fullmatch(r"\[ *\d+\.\d{3}\]\[t\d+\]\[startup\] first step: (\d+) ms \((\d+) ms since Launch game was pressed\)", lines[0])
+second = re.fullmatch(r"\[ *\d+\.\d{3}\]\[t\d+\]\[startup\] second step: (\d+) ms \((\d+) ms since Launch game was pressed\)", lines[1])
+event = re.fullmatch(r"\[ *\d+\.\d{3}\]\[t\d+\]\[startup\] first frame presented \((\d+) ms since Launch game was pressed\)", lines[2])
+check(first and second and event, f"line format: {lines[:3]}")
+if first and second and event:
+    check(500 <= int(first.group(1)) < 5000, f"the first phase counts from the load of the library: {first.group(1)} ms")
+    check(80 <= int(second.group(1)) < 500, f"a phase lasts from the end of the previous one: {second.group(1)} ms")
+    check(900 <= int(first.group(2)) < 10000, f"total counted from the launcher's time: {first.group(2)} ms")
+    check(int(second.group(2)) - int(first.group(2)) >= 80, "and it keeps counting")
+    check(int(second.group(2)) <= int(event.group(1)) < int(second.group(2)) + 5000, "an event carries only the total")
+check(len(lines[3]) < 400 and "pppp" in lines[3] and len(lines[4]) < 400 and "eeee" in lines[4], "overlong names are cut")
+check(int(p.stdout.strip().split("=")[1]) >= 8, "mirrored to logcat")
+shutil.rmtree(d)
+# Without a believable time from the launcher the total counts from the load of the library.
+cases = [("none", None), ("empty", ""), ("not a number", "soon"), ("trailing text", str(now_ms - 400) + "ms"),
+         ("zero", "0"), ("negative", "-5"), ("in the future", str(now_ms + 3600000))]
+if now_ms > 300000: # needs a machine that has been up for longer than the logger looks back
+    cases.append(("a launch long past", str(now_ms - 200000)))
+for label, value in cases:
+    d = tempfile.mkdtemp(prefix="logtest_")
+    p = run(d, "startup", extra_env=None if value is None else {"SHADOWRECOMP_LAUNCH_UPTIME_MS": value})
+    lines = [l for l in read(os.path.join(d, "log.txt")).splitlines() if "[startup]" in l]
+    match = len(lines) == 5 and re.search(r"first step: (\d+) ms \((\d+) ms since the game library was loaded\)", lines[0])
+    check(bool(match) and abs(int(match.group(1)) - int(match.group(2))) <= 1, f"launch time {label}: counted from the library load")
+    shutil.rmtree(d)
 
 current = "size limit"
 d = tempfile.mkdtemp(prefix="logtest_")

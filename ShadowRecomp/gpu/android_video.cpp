@@ -4,14 +4,19 @@
 
 #include <os/android/logger_android.h>
 #include <os/android/lifecycle_android.h>
+#include <os/android/storage_android.h>
 #include <os/android/vulkan_driver_android.h>
 #include <os/logger.h>
+#include <user/config.h>
 
 #include <plume_vulkan.h>
+
+#include "vulkan_pipeline_cache.h"
 
 #include <SDL3/SDL.h>
 #include <android/native_window.h>
 
+#include <atomic>
 #include <mutex>
 
 using namespace plume;
@@ -138,6 +143,52 @@ namespace AndroidVideo
         // A custom driver that loads is not proof that it works; a usable swap chain is.
         AndroidMarkVulkanStartupSuccessful();
         os::android::LogHeartbeat();
+    }
+
+    void OnFramePresented()
+    {
+        // Only ever called by the thread that presents.
+        static bool s_firstFrame = true;
+        if (s_firstFrame)
+        {
+            s_firstFrame = false;
+            os::android::LogStartupEvent("first frame of the game presented");
+        }
+    }
+
+    void InitPipelineCache(RenderDevice* device)
+    {
+        if (!Config::PipelineDiskCache)
+        {
+            LOGN("Vulkan pipeline cache: turned off with Video.PipelineDiskCache in config.toml.");
+            return;
+        }
+
+        const std::filesystem::path& cacheDir = os::android::GetCacheDir();
+        if (cacheDir.empty())
+            return;
+
+        auto* vulkanDevice = static_cast<VulkanDevice*>(device);
+        VulkanPipelineCache::Initialize(vulkanDevice->vk, vulkanDevice->physicalDeviceProperties,
+            cacheDir / "vulkan_pipeline_cache.bin");
+    }
+
+    void SavePipelineCache()
+    {
+        VulkanPipelineCache::Save();
+    }
+
+    void OnCachedPipelinesCreated()
+    {
+        // The data of the earlier run went into all of these pipelines.
+        VulkanPipelineCache::ConfirmLoadedData();
+        VulkanPipelineCache::Save();
+
+        // Batches of pipelines that turn up later (for shaders the game creates at runtime)
+        // are no longer part of the startup.
+        static std::atomic<bool> s_first{ true };
+        if (s_first.exchange(false))
+            os::android::LogStartupEvent("pipelines of the caches created");
     }
 
     void LogDeviceSupport(RenderDevice* device)

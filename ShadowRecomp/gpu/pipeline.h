@@ -108,3 +108,37 @@ XXH64_hash_t ComputePipelineStateHash(const PipelineState& pipelineState);
 void CompilePendingPipelinesForShader(uint64_t runtimeHash, GuestShader* shader, bool isVertexShader);
 void ApplyCacheEntryVariants(const PipelineCacheEntry& entry, PipelineState& pipelineState);
 void EnqueueDeferredPipeline(const PipelineCacheEntry& entry);
+
+// Whether the pipelines listed in the pipeline caches are created by background threads
+// while the game is already running (true), or all of them before it starts (false).
+//
+// Creating them up front is quick where the graphics driver keeps compiled pipelines on
+// disk, which is every desktop driver: there the cost is paid once. No Android driver does
+// (gpu/vulkan_pipeline_cache.h does it for them), and their compilers are slow, so on
+// Android the game would sit on a black screen for the full compilation of about a
+// thousand pipelines, on every launch. There they are created in the background instead: a
+// pipeline that a draw needs before its turn is created by the render thread on the spot,
+// as any pipeline missing from the caches is.
+bool PrecompilesPipelinesInBackground();
+
+// Has a background thread create the pipeline of `pipelineState`, which must be sanitized
+// and have `hash` as its ComputePipelineStateHash(), and hand it to the render thread. The
+// render thread keeps it unless it had to create one for that state itself in the
+// meantime. Returns false if the pipeline had been queued before.
+bool CompilePipelineInBackground(XXH64_hash_t hash, const PipelineState& pipelineState);
+
+// Brackets a run of CompilePipelineInBackground() calls. The background threads start on
+// none of the pipelines until the last such object is gone, and treat what was queued as
+// one batch: when they are done with it, the driver's pipeline cache is written to disk.
+class BackgroundPipelineBatch
+{
+public:
+    BackgroundPipelineBatch();
+    ~BackgroundPipelineBatch();
+
+    BackgroundPipelineBatch(const BackgroundPipelineBatch&) = delete;
+    BackgroundPipelineBatch& operator=(const BackgroundPipelineBatch&) = delete;
+
+private:
+    const bool m_active;
+};

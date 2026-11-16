@@ -32,6 +32,7 @@
 #include <patches/pause_patches.h>
 #include <patches/bloom_patches.h>
 #include <misc/rich_presence/shadow_rpc.h>
+#include <os/startup_timeline.h>
 
 #ifdef __ANDROID__
 // Renames main() to SDL_main(), the entry point SDLActivity calls on its own thread.
@@ -195,6 +196,7 @@ int main(int argc, char* argv[])
 
 
     os::logger::Init();
+    STARTUP_PHASE("game code started and log opened");
 
 #ifdef __ANDROID__
     // Everything is read from and written to the storage root chosen in the launcher.
@@ -307,6 +309,7 @@ int main(int argc, char* argv[])
     }
 
     Config::Load();
+    STARTUP_PHASE("configuration loaded");
 
 #ifdef __ANDROID__
     // The game always covers the screen; a config.toml copied from a PC must not make
@@ -329,6 +332,7 @@ int main(int argc, char* argv[])
     // The launcher stages the game source (disc image or extracted disc); install it
     // before anything looks for the game. See os/android/install_android.h.
     const os::android::StagedInstallResult stagedInstall = os::android::InstallStagedGame(GetGamePath(), MainGameFolder);
+    STARTUP_PHASE(stagedInstall == os::android::StagedInstallResult::NothingStaged ? "checked for a game to install" : "game install attempted");
 #endif
 
     bool isGameInstalled = std::filesystem::exists(GameExecutable);
@@ -408,8 +412,10 @@ int main(int argc, char* argv[])
         os::process::ShowConsole();
 
     HostStartup();
+    STARTUP_PHASE("input and guest heap initialized");
 
     ModLoader::Init();
+    STARTUP_PHASE("mods loaded");
 
     //init mutexes for multi-core patch
     InitMultiCoreMutexesPatches();
@@ -424,6 +430,7 @@ int main(int argc, char* argv[])
 
     xbePath = GameExecutable;
     uint32_t entry = LoadXbeModule(xbePath);
+    STARTUP_PHASE("game executable loaded");
 
     if (!runInstallerWizard)
     {
@@ -452,6 +459,7 @@ int main(int argc, char* argv[])
     PausePatchesInit();
     BloomConfigValueChangedCallback(&Config::BloomIntensity);
     RichPresence::ShadowRpc::Start();
+    STARTUP_PHASE("patches applied; starting the game");
 
     //launch the Start function of the game
     isHostThread = true;

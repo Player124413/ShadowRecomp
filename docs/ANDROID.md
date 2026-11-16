@@ -5,9 +5,9 @@ Vulkan, with a launcher app that installs the game files and manages drivers, mo
 settings.
 
 > [!WARNING]
-> The Android port is experimental. At the time of writing it has not been run on a
-> device: expect it to need fixes, and report what you find with `log.txt` attached
-> (see [Logs](#logs)).
+> The Android port is experimental and has been run on very few devices: expect it to
+> need fixes on yours, and report what you find with `log.txt` attached (see
+> [Logs](#logs)).
 
 - [Requirements](#requirements)
 - [Using the app](#using-the-app)
@@ -98,6 +98,38 @@ The two drivers marked `sysmem+nobin` always render directly and ignore this set
 
 If a driver crashes or hangs while the game starts, the next launch falls back to the
 system driver on its own. If the problem repeats, select **System**.
+
+### Starting the game
+
+The game starts while its graphics pipelines (the GPU programs it draws with) are still
+being prepared on background threads. What the driver compiles for them is kept in the
+app's cache and reused, so this is quick, except on the first start after
+
+- the app was installed or updated,
+- another Vulkan driver was selected, or
+- the app's cache was cleared, by you or by Android when storage ran low.
+
+Then every pipeline is compiled from scratch. The game starts just as soon, but can
+stutter until that is done.
+
+The intro logos are the game's own. **Manage mods** has a code that skips them, *Quick
+boot*.
+
+If the game takes long to start, `log.txt` (see [Logs](#logs)) tells where the time
+goes. Every line with `[startup]` is one step, with how long it took and how long ago
+**Launch game** was pressed. The numbers below only show the form:
+
+```
+[startup] graphics driver loaded and device created: 212 ms (655 ms since Launch game was pressed)
+```
+
+Two settings exist for narrowing down a problem with any of this. They are not in
+`config.toml` until you add them to its `[Video]` section:
+
+| Setting                                 | Effect                                               |
+| --------------------------------------- | ---------------------------------------------------- |
+| `BackgroundPipelineCompilation = false` | All pipelines are created before the game starts, as the desktop versions do: a longer black screen at launch, no stutter after it |
+| `PipelineDiskCache = false`             | Nothing the driver compiles is kept between launches |
 
 ### Controls
 
@@ -271,10 +303,10 @@ answer with the build tree that the APK was made from:
 ### Tests
 
 The Android-specific code (driver selection and startup recovery, driver import, the
-staged game installation, the on-screen controls, logging, and the launcher's handling
-of archives, disc images and storage copies) and the build tools in `tools/android`
-have tests that run on the build machine. They need neither the NDK nor a device nor
-the game files:
+staged game installation, the on-screen controls, logging, the pipeline cache kept on
+disk and the background compilation queue, and the launcher's handling of archives,
+disc images and storage copies) and the build tools in `tools/android` have tests that
+run on the build machine. They need neither the NDK nor a device nor the game files:
 
 ```bash
 cmake -S tools/android/tests -B out/build/android-tests
@@ -378,6 +410,9 @@ install, but cannot update one another.
 - Shaders are never compiled on the device: the game only has the shaders that were
   compiled into it at build time. One that is missing from them, which a mod can cause,
   is drawn with the generic fixed-function shader and reported in `log.txt`.
+- Pipelines are created in the background while the game runs instead of before it
+  starts, and the game keeps the driver's pipeline cache on disk itself, because no
+  Android driver does. See [Starting the game](#starting-the-game).
 - Discord Rich Presence is not available.
 - Only arm64-v8a is supported.
 

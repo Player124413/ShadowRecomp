@@ -30,11 +30,17 @@ get_filename_component(REPOSITORY_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../../.." AB
 set(GAME_ROOT "${REPOSITORY_ROOT}/ShadowRecomp")
 set(THIRDPARTY_ROOT "${REPOSITORY_ROOT}/thirdparty")
 set(FMT_INCLUDE "${REPOSITORY_ROOT}/tools/XboxRecomp/thirdparty/fmt/include")
+set(XXHASH_ROOT "${REPOSITORY_ROOT}/tools/XboxRecomp/thirdparty/xxHash")
+set(VOLK_INCLUDE "${THIRDPARTY_ROOT}/plume/contrib/volk")
+set(VULKAN_HEADERS_INCLUDE "${THIRDPARTY_ROOT}/plume/contrib/Vulkan-Headers/include")
 
 foreach (required
         "${THIRDPARTY_ROOT}/SDL/include/SDL3/SDL.h"
         "${THIRDPARTY_ROOT}/imgui/imgui.cpp"
-        "${FMT_INCLUDE}/fmt/format.h")
+        "${FMT_INCLUDE}/fmt/format.h"
+        "${XXHASH_ROOT}/xxhash.c"
+        "${VOLK_INCLUDE}/volk.h"
+        "${VULKAN_HEADERS_INCLUDE}/vulkan/vulkan_core.h")
     if (NOT EXISTS "${required}")
         message(FATAL_ERROR "${required} is missing. Run: git submodule update --init --recursive")
     endif()
@@ -139,6 +145,29 @@ android_test_executable(logger_harness NO_ADDRESS_SANITIZER SOURCES
 target_link_libraries(logger_harness PRIVATE Threads::Threads ${CMAKE_DL_LIBS})
 add_test(NAME logger COMMAND Python3::Interpreter "${CMAKE_CURRENT_SOURCE_DIR}/logger_test.py" $<TARGET_FILE:logger_harness>)
 set_tests_properties(logger PROPERTIES TIMEOUT 300)
+
+# --- Background pipeline compilation -----------------------------------------------------
+# gpu/background_work_queue.h: the threads that create pipelines while the game runs.
+android_test_executable(work_queue_test SOURCES work_queue_test.cpp)
+target_link_libraries(work_queue_test PRIVATE Threads::Threads)
+add_test(NAME background_work_queue COMMAND work_queue_test)
+
+# --- The graphics driver's pipeline cache, kept on disk ---------------------------------
+# gpu/vulkan_pipeline_cache.cpp against a stand-in driver: the harness defines the three
+# volk entry points the code uses. Every launch of the app is one run of the harness.
+android_test_executable(pipeline_cache_harness SOURCES
+    pipeline_cache_harness.cpp
+    "${GAME_ROOT}/gpu/vulkan_pipeline_cache.cpp"
+    "${XXHASH_ROOT}/xxhash.c"
+)
+set_source_files_properties("${XXHASH_ROOT}/xxhash.c" PROPERTIES COMPILE_OPTIONS "-w")
+target_include_directories(pipeline_cache_harness PRIVATE
+    "${VOLK_INCLUDE}"
+    "${VULKAN_HEADERS_INCLUDE}"
+    "${XXHASH_ROOT}"
+)
+target_link_libraries(pipeline_cache_harness PRIVATE Threads::Threads)
+add_test(NAME pipeline_cache COMMAND Python3::Interpreter "${CMAKE_CURRENT_SOURCE_DIR}/pipeline_cache_test.py" $<TARGET_FILE:pipeline_cache_harness>)
 
 # --- Build tools (Python) ---------------------------------------------------------------
 # fetch-xbe.py gets default.xbe out of a disc image, an archive, a folder or a link;

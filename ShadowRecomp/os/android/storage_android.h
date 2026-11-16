@@ -33,6 +33,16 @@ namespace os::android
     // hook libraries from here.
     const std::filesystem::path& GetNativeLibraryDir();
 
+    // App-private cache directory (/data/user/0/<package>/cache), for data that can be
+    // recreated: Android empties it when storage runs low, and so does "Clear cache" in the
+    // system settings. Falls back to a "cache" folder in the internal files directory.
+    const std::filesystem::path& GetCacheDir();
+
     // versionName of the installed APK, for the log header.
     const char* GetAppVersion();
+
+    // A value that changes whenever the APK is installed or updated, or an empty string
+    // when it is unknown. It tells whether files extracted from the APK are still current
+    // without reading the APK again.
+    const char* GetApkStamp();
 }

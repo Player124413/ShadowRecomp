@@ -87,6 +87,29 @@ int main(int argc, char** argv)
         os::android::SetLogLocation("after the flood");
         Crash();
     }
+    else if (mode == "startup")
+    {
+        usleep(500 * 1000);
+        os::android::LogStartupPhase("first step");
+        usleep(80 * 1000);
+        os::android::LogStartupPhase("second step");
+        os::android::LogStartupEvent("first frame presented");
+        // Longer than the line buffer: cut, never overflowed.
+        os::android::LogStartupPhase(std::string(1000, 'p'));
+        os::android::LogStartupEvent(std::string(1000, 'e'));
+    }
+    else if (mode == "lengths")
+    {
+        // Lines around the size of the logger's stack buffer, with and without a function name.
+        for (int n = 900; n <= 1100; n++)
+        {
+            const std::string text = "<" + std::string(size_t(n), char('a' + n % 26)) + ">";
+            os::logger::Log(text, os::logger::ELogType::None, n % 2 ? "function_name" : nullptr);
+        }
+        os::logger::Log(std::string(), os::logger::ELogType::None, nullptr);
+        os::logger::Log(std::string(), os::logger::ELogType::Warning, "f");
+        os::logger::Log("<" + std::string(200000, 'z') + ">", os::logger::ELogType::Error, "big");
+    }
     else if (mode == "threads")
     {
         std::vector<std::thread> threads;

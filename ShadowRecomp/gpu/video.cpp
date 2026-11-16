@@ -52,6 +52,7 @@
 #include <shared_mutex>
 #include <patches/multi_core_patches.h>
 #include <user/achievement_manager.h>
+#include <os/startup_timeline.h>
 #include "pipeline.h"
 
 const uint32_t GuestDevicePtrAddr = 0x3E0A18;
@@ -949,6 +950,7 @@ static_assert(uint32_t(RenderFormat::MAX) == 75);
 static Mutex g_pipelineCacheMutex;
 static std::atomic<bool> g_pipelineCacheShutdownDone{ false };
 static ankerl::unordered_dense::map<uint64_t, PipelineCacheEntry> g_pipelineCacheEntries;
+static bool g_pipelineCacheHasUnsavedEntries = false; // Guarded by g_pipelineCacheMutex.
 static bool TryCompileFromCacheEntry(const PipelineCacheEntry& entry);
 
 
@@ -973,13 +975,21 @@ static void RecordPipelineState(const PipelineState& pipelineState)
 
 	std::lock_guard lock(g_pipelineCacheMutex);
 	if (!g_pipelineCacheEntries.contains(hash))
+	{
 		g_pipelineCacheEntries.emplace(hash, std::move(entry));
+		g_pipelineCacheHasUnsavedEntries = true;
+	}
 }
 
-static void SavePipelineCache()
+// onlyIfChanged: write only if the game has used a pipeline state that the file does not
+// have yet. For callers that save more than once per run.
+static void SavePipelineCache(bool onlyIfChanged = false)
 {
 	std::lock_guard lock(g_pipelineCacheMutex);
 	if (g_pipelineCacheEntries.empty())
+		return;
+
+	if (onlyIfChanged && !g_pipelineCacheHasUnsavedEntries)
 		return;
 
 	std::vector<PipelineCacheEntry> entries;
@@ -999,11 +1009,19 @@ static void SavePipelineCache()
 	}
 
 	auto path = GetPipelineCachePath();
-	std::filesystem::create_directories(path.parent_path());
-	std::ofstream file(path, std::ios::binary);
+	std::error_code ec;
+	std::filesystem::create_directories(path.parent_path(), ec);
+
+	// Written under another name and renamed once complete: a process that is killed while
+	// it writes (the usual end of an Android process) must not leave half a file in the
+	// place of a whole one.
+	auto temporaryPath = path;
+	temporaryPath += ".tmp";
+
+	std::ofstream file(temporaryPath, std::ios::binary);
 	if (!file.is_open())
 	{
-		LOGFN("PipelineCache: Failed to open {} for writing", path.string());
+		LOGFN("PipelineCache: Failed to open {} for writing", temporaryPath.string());
 		return;
 	}
 
@@ -1013,6 +1031,24 @@ static void SavePipelineCache()
 	file.write(reinterpret_cast<const char*>(&PIPELINE_CACHE_VERSION), sizeof(PIPELINE_CACHE_VERSION));
 	file.write(reinterpret_cast<const char*>(&entryCount), sizeof(entryCount));
 	file.write(reinterpret_cast<const char*>(compressed.data()), compressedSize);
+	file.close();
+
+	if (file.fail())
+	{
+		LOGFN("PipelineCache: Failed to write {}", temporaryPath.string());
+		std::filesystem::remove(temporaryPath, ec);
+		return;
+	}
+
+	std::filesystem::rename(temporaryPath, path, ec);
+	if (ec)
+	{
+		LOGFN("PipelineCache: Failed to replace {} ({})", path.string(), ec.message());
+		std::filesystem::remove(temporaryPath, ec);
+		return;
+	}
+
+	g_pipelineCacheHasUnsavedEntries = false;
 
 	LOGFN("PipelineCache: Saved {} entries", entryCount);
 }
@@ -1109,7 +1145,8 @@ static void PrecompileUserPipelines()
 	}
 
 	auto totalElapsed = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - totalStart).count();
-	LOGFN("PipelineCache: Precompiled {} pipelines ({} skipped, {} dropped) in {:.2f} ms", compiled, skipped, dropped, totalElapsed);
+	LOGFN("PipelineCache: {} {} pipelines ({} skipped, {} dropped) in {:.2f} ms",
+		PrecompilesPipelinesInBackground() ? "Queued" : "Precompiled", compiled, skipped, dropped, totalElapsed);
 }
 
 static bool TryCompileFromCacheEntry(const PipelineCacheEntry& entry)
@@ -1196,6 +1233,12 @@ static bool TryCompileFromCacheEntry(const PipelineCacheEntry& entry)
 	SanitizePipelineState(pipelineState);
 
 	XXH64_hash_t hash = ComputePipelineStateHash(pipelineState);
+
+	// The render thread owns g_pipelines once the game runs; pipelines made elsewhere reach
+	// it through the render queue.
+	if (PrecompilesPipelinesInBackground())
+		return CompilePipelineInBackground(hash, pipelineState);
+
 	auto& pipeline = g_pipelines[hash];
 	if (pipeline == nullptr)
 	{
@@ -1246,7 +1289,8 @@ static void PrecompileStaticPipelines(const std::function<void(float)>& progress
 	}
 
 	auto totalElapsed = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - totalStart).count();
-	LOGFN("PipelineCache: Static precompiled {} pipelines ({} deferred) in {:.2f} ms", compiled, deferred, totalElapsed);
+	LOGFN("PipelineCache: Static {} {} pipelines ({} deferred) in {:.2f} ms",
+		PrecompilesPipelinesInBackground() ? "queued" : "precompiled", compiled, deferred, totalElapsed);
 }
 
 
@@ -2579,6 +2623,7 @@ bool Video::CreateHostDevice(const char* sdlVideoDriver, bool graphicsApiRetry)
 	ImPlot::CreateContext();
 
 	GameWindow::Init(sdlVideoDriver);
+	STARTUP_PHASE("window created");
 
 
 #ifdef SHADOW_RECOMP_D3D12
@@ -2675,10 +2720,20 @@ bool Video::CreateHostDevice(const char* sdlVideoDriver, bool graphicsApiRetry)
 	AndroidVideo::LogDeviceSupport(g_device.get());
 #endif
 
+	STARTUP_PHASE("graphics driver loaded and device created");
+
+#ifdef __ANDROID__
+	// Before the first pipeline is created: from here on the driver reuses what it compiled
+	// in earlier runs.
+	AndroidVideo::InitPipelineCache(g_device.get());
+	STARTUP_PHASE("pipeline cache of the driver read");
+#endif
+
 	FixedFunctionVertexShaderVariants::Initialize(g_device.get(), g_vulkan);
 	FixedFunctionPixelShaderVariants::Initialize(g_device.get(), g_vulkan);
 
 	LoadEmbeddedResources();
+	STARTUP_PHASE("embedded resources unpacked");
 
 	constexpr uint64_t LowEndMemoryLimit = 2048ULL * 1024ULL * 1024ULL;
 	RenderDeviceDescription deviceDescription = g_device->getDescription();
@@ -2745,6 +2800,7 @@ bool Video::CreateHostDevice(const char* sdlVideoDriver, bool graphicsApiRetry)
 	g_swapChain = g_queue->createSwapChain(swapChainDesc);
 	SetSwapChainVsync();
 	g_swapChainValid = !g_swapChain->needsResize();
+	STARTUP_PHASE("swap chain created");
 
 	for (auto& acquireSemaphore : g_acquireSemaphores)
 		acquireSemaphore = g_device->createCommandSemaphore();
@@ -2855,8 +2911,10 @@ bool Video::CreateHostDevice(const char* sdlVideoDriver, bool graphicsApiRetry)
 	desc.depthWriteEnabled = true;
 	desc.depthTargetFormat = DepthStencilFormat;
 	g_copyDepthPipeline = g_device->createGraphicsPipeline(desc);
+	STARTUP_PHASE("descriptor sets and copy pipeline created");
 
 	CreateImGuiBackend();
+	STARTUP_PHASE("interface fonts and textures loaded");
 
 	auto gammaCorrectionShader = CREATE_SHADER(gamma_correction_ps);
 
@@ -2896,6 +2954,7 @@ bool Video::CreateHostDevice(const char* sdlVideoDriver, bool graphicsApiRetry)
 		blankTextureBarriers[i] = RenderTextureBarrier(g_blankTextures[i].get(), RenderTextureLayout::SHADER_READ);
 
 	g_commandLists[g_frame]->barriers(RenderBarrierStage::NONE, blankTextureBarriers, std::size(blankTextureBarriers));
+	STARTUP_PHASE("first command list opened");
 
 	return true;
 }
@@ -4227,8 +4286,32 @@ void Video::Present(X86Context* ctx)
 void Video::PrecompileShadersAndPipelines()
 {
 	PrecompileShaders();
-	PrecompileStaticPipelines();
-	PrecompileUserPipelines();
+	STARTUP_PHASE("shaders created");
+
+	{
+		// Where pipelines are compiled in the background, the two calls below only queue
+		// them, and the background threads take the lot as one batch.
+		BackgroundPipelineBatch batch;
+		PrecompileStaticPipelines();
+		PrecompileUserPipelines();
+	}
+
+#ifdef __ANDROID__
+	// Otherwise the background threads report this when they are done.
+	if (!PrecompilesPipelinesInBackground())
+		AndroidVideo::OnCachedPipelinesCreated();
+#endif
+
+	STARTUP_PHASE(PrecompilesPipelinesInBackground() ? "pipelines queued for background compilation" : "pipelines created");
+}
+
+void Video::SaveCaches()
+{
+	SavePipelineCache(true);
+
+#ifdef __ANDROID__
+	AndroidVideo::SavePipelineCache();
+#endif
 }
 
 void Video::PrecompileShadersAndPipelinesForInstall(const std::function<void(float)>& progress)
@@ -4402,6 +4485,11 @@ static void ProcEndFrame(const RenderCommand& cmd)
 	{
 		RenderCommandSemaphore* signalSemaphores[] = { g_renderSemaphores[g_frame].get() };
 		g_swapChainValid = g_swapChain->present(g_backBufferIndex, signalSemaphores, std::size(signalSemaphores));
+
+#ifdef __ANDROID__
+		if (g_swapChainValid)
+			AndroidVideo::OnFramePresented();
+#endif
 	}
 	presentExecuted = true;
 
@@ -7090,6 +7178,10 @@ void Video::Shutdown()
 		return;
 
 	SavePipelineCache();
+
+#ifdef __ANDROID__
+	AndroidVideo::SavePipelineCache();
+#endif
 
 	if (!s_dumpPipelineCacheHeader)
 		return;

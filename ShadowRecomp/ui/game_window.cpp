@@ -102,6 +102,13 @@ bool Window_OnSDLEvent(void*, SDL_Event* event)
     switch (event->type)
     {
     case SDL_EVENT_WILL_ENTER_BACKGROUND:
+        os::android::SetAppPaused(true);
+
+        // Android gives no notice before it ends a process that is in the background, and
+        // that is how nearly every session ends: what is to be kept is written now.
+        Video::SaveCaches();
+        break;
+
     case SDL_EVENT_DID_ENTER_BACKGROUND:
         os::android::SetAppPaused(true);
         break;

@@ -6,6 +6,15 @@
 #include <os/logger.h>
 #include "vertexdeclaration.h"
 #include "render_commands.h"
+#include "background_work_queue.h"
+
+#ifdef __ANDROID__
+#include "android_video.h"
+#include <user/config.h>
+#include <pthread.h>
+#include <sys/resource.h>
+#include <unistd.h>
+#endif
 
 
 static Mutex g_pendingCacheMutex;
@@ -272,6 +281,101 @@ static void EnqueueAddPipeline(XXH64_hash_t hash, std::unique_ptr<RenderPipeline
 	SendRenderCommand(cmd);
 }
 
+
+// --- Background pipeline compilation ----------------------------------------------------
+// See PrecompilesPipelinesInBackground() in pipeline.h for the why.
+
+struct QueuedPipeline
+{
+	XXH64_hash_t hash;
+	PipelineState pipelineState;
+};
+
+// States that were handed to the background threads, so that none is compiled twice.
+static Mutex g_queuedPipelineMutex;
+static ankerl::unordered_dense::set<XXH64_hash_t> g_queuedPipelineHashes;
+
+bool PrecompilesPipelinesInBackground()
+{
+#ifdef __ANDROID__
+	return Config::BackgroundPipelineCompilation;
+#else
+	return false;
+#endif
+}
+
+static uint32_t GetPipelineCompilerThreadCount()
+{
+	// Half of the cores, four at most. The other half stays with the game, which is
+	// starting up at the same time, and compiling does not get faster forever anyway.
+	return std::clamp(std::thread::hardware_concurrency() / 2, 1u, 4u);
+}
+
+static void OnPipelineCompilerThreadStarted(uint32_t threadIndex)
+{
+#ifdef __ANDROID__
+	// Shown in the thread dump the watchdog writes to log.txt when frames stop.
+	char name[16];
+	snprintf(name, sizeof(name), "PSO Compiler %u", threadIndex);
+	pthread_setname_np(pthread_self(), name);
+
+	// Far below the game's threads (the nice value of Android's "background" priority):
+	// where a core is free the compiler runs at full speed, where it has to share one with
+	// the game it gets a tenth of it.
+	setpriority(PRIO_PROCESS, id_t(gettid()), 10);
+#else
+	(void)threadIndex;
+#endif
+}
+
+static void CompileQueuedPipeline(QueuedPipeline& queued)
+{
+	EnqueueAddPipeline(queued.hash, CreateGraphicsPipeline(queued.pipelineState));
+}
+
+static void OnQueuedPipelinesCompiled(uint32_t count, double milliseconds)
+{
+	LOGFN("PipelineCache: Background threads compiled {} pipelines in {:.2f} ms", count, milliseconds);
+
+#ifdef __ANDROID__
+	AndroidVideo::OnCachedPipelinesCreated();
+#endif
+}
+
+static BackgroundWorkQueue<QueuedPipeline>& GetPipelineCompiler()
+{
+	// Never destroyed: its threads are there for as long as the process is.
+	static auto* compiler = new BackgroundWorkQueue<QueuedPipeline>(GetPipelineCompilerThreadCount(),
+		{ CompileQueuedPipeline, OnQueuedPipelinesCompiled, OnPipelineCompilerThreadStarted });
+
+	return *compiler;
+}
+
+bool CompilePipelineInBackground(XXH64_hash_t hash, const PipelineState& pipelineState)
+{
+	{
+		std::lock_guard lock(g_queuedPipelineMutex);
+		if (!g_queuedPipelineHashes.insert(hash).second)
+			return false;
+	}
+
+	GetPipelineCompiler().Add({ hash, pipelineState });
+	return true;
+}
+
+BackgroundPipelineBatch::BackgroundPipelineBatch() : m_active(PrecompilesPipelinesInBackground())
+{
+	if (m_active)
+		GetPipelineCompiler().BeginHold();
+}
+
+BackgroundPipelineBatch::~BackgroundPipelineBatch()
+{
+	if (m_active)
+		GetPipelineCompiler().EndHold();
+}
+
+
 void CompilePendingPipelinesForShader(uint64_t runtimeHash, GuestShader* shader, bool isVertexShader)
 {
 	std::vector<PipelineCacheEntry> pending;
@@ -293,6 +397,11 @@ void CompilePendingPipelinesForShader(uint64_t runtimeHash, GuestShader* shader,
 
 	LOGFN("PipelineCache: Compiling {} deferred pipelines for {} runtime hash={:016X}",
 		pending.size(), isVertexShader ? "VS" : "PS", runtimeHash);
+
+	// This runs on the game's thread, in the middle of creating a shader: where pipelines
+	// are compiled in the background, these go there too rather than stall the game.
+	const bool inBackground = PrecompilesPipelinesInBackground();
+	BackgroundPipelineBatch batch;
 
 	uint32_t redeferred = 0;
 	ankerl::unordered_dense::set<XXH64_hash_t> queued;
@@ -410,7 +519,10 @@ void CompilePendingPipelinesForShader(uint64_t runtimeHash, GuestShader* shader,
 		XXH64_hash_t hash = ComputePipelineStateHash(pipelineState);
 		if (queued.insert(hash).second)
 		{
-			EnqueueAddPipeline(hash, CreateGraphicsPipeline(pipelineState));
+			if (inBackground)
+				CompilePipelineInBackground(hash, pipelineState);
+			else
+				EnqueueAddPipeline(hash, CreateGraphicsPipeline(pipelineState));
 		}
 	}
 

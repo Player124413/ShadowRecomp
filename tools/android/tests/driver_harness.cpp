@@ -3,9 +3,10 @@
 //
 //   driver_harness <driver 0..6> <render mode 0..2> <reach swapchain 0|1>
 //
-// Directories come from the SHADOWRECOMP_* variables (the real storage_android.cpp reads
-// them), system properties from PROP_<name with dots as underscores>, APK assets from
-// TEST_ASSETS_DIR. Prints what the launch did as key=value lines on stdout.
+// Directories and the APK stamp come from the SHADOWRECOMP_* variables (the real
+// storage_android.cpp reads them), system properties from PROP_<name with dots as
+// underscores>, APK assets from TEST_ASSETS_DIR; TEST_ASSET_READ_FAILS makes every asset
+// unreadable. Prints what the launch did as key=value lines on stdout.
 #include <os/android/android_settings.h>
 #include <os/android/logger_android.h>
 #include <os/android/vulkan_driver_android.h>
@@ -24,6 +25,7 @@ static std::string g_openedDriver = "-";
 static std::string g_openedDriverDir;
 static std::string g_openedHookDir;
 static int g_openCalls = 0;
+static int g_assetOpens = 0;
 static std::string g_location;
 
 // The loader looks this symbol up in what adrenotools returns.
@@ -55,6 +57,7 @@ extern "C" int __system_property_get(const char* name, char* value)
 struct SDL_IOStream { FILE* file; };
 extern "C" SDL_IOStream* SDL_IOFromFile(const char* path, const char* mode)
 {
+    g_assetOpens++;
     const char* assets = getenv("TEST_ASSETS_DIR");
     if (!assets) return nullptr;
     FILE* file = fopen((std::string(assets) + "/" + path).c_str(), mode);
@@ -65,7 +68,10 @@ extern "C" Sint64 SDL_GetIOSize(SDL_IOStream* io)
     long at = ftell(io->file); fseek(io->file, 0, SEEK_END); long size = ftell(io->file); fseek(io->file, at, SEEK_SET);
     return size;
 }
-extern "C" size_t SDL_ReadIO(SDL_IOStream* io, void* ptr, size_t size) { return fread(ptr, 1, size, io->file); }
+extern "C" size_t SDL_ReadIO(SDL_IOStream* io, void* ptr, size_t size)
+{
+    return getenv("TEST_ASSET_READ_FAILS") ? 0 : fread(ptr, 1, size, io->file);
+}
 extern "C" bool SDL_CloseIO(SDL_IOStream* io) { fclose(io->file); delete io; return true; }
 
 namespace os::logger
@@ -124,6 +130,7 @@ int main(int argc, char** argv)
     printf("tu_debug=%s\n", tu ? tu : "-");
     printf("fd_dev_features=%s\n", fd ? fd : "-");
     printf("location=%s\n", g_location.c_str());
+    printf("asset_opens=%d\n", g_assetOpens);
     fflush(stdout);
     // A launch that never reaches the swapchain dies without any cleanup.
     _Exit(0);

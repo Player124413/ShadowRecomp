@@ -1,8 +1,12 @@
 package org.shadowrecomp.android;
 
 import android.app.AlertDialog;
+import android.content.Intent;
+import android.content.pm.PackageInfo;
+import android.content.pm.PackageManager;
 import android.os.Build;
 import android.os.Bundle;
+import android.os.SystemClock;
 import android.system.ErrnoException;
 import android.system.Os;
 import android.util.Log;
@@ -37,6 +41,12 @@ import java.io.IOException;
  */
 public class GameActivity extends SDLActivity {
     private static final String TAG = "ShadowRecomp";
+
+    /**
+     * Intent extra with {@link SystemClock#uptimeMillis()} at the moment Launch game was pressed.
+     * The native side measures the startup from there (see the "[startup]" lines of log.txt).
+     */
+    static final String EXTRA_LAUNCH_UPTIME = "org.shadowrecomp.android.LAUNCH_UPTIME";
 
     private static boolean gameStorageLocked;
 
@@ -90,12 +100,38 @@ public class GameActivity extends SDLActivity {
         }
 
         File media = AppStorage.mediaBase(this);
+        File cache = getCacheDir();
         setEnvironment("SHADOWRECOMP_DATA_ROOT", dataRoot);
         setEnvironment("SHADOWRECOMP_INTERNAL_DIR", getFilesDir().getAbsolutePath());
         setEnvironment("SHADOWRECOMP_EXTERNAL_DIR", AppStorage.transferRoot(this).getAbsolutePath());
         setEnvironment("SHADOWRECOMP_MEDIA_DIR", media != null ? media.getAbsolutePath() : "");
+        setEnvironment("SHADOWRECOMP_CACHE_DIR", cache != null ? cache.getAbsolutePath() : "");
         setEnvironment("SHADOWRECOMP_NATIVE_LIB_DIR", getApplicationInfo().nativeLibraryDir);
         setEnvironment("SHADOWRECOMP_APP_VERSION", UpdateManager.currentVersion(this));
+        setEnvironment("SHADOWRECOMP_APK_STAMP", apkStamp());
+
+        // SystemClock.uptimeMillis() and the native CLOCK_MONOTONIC are the same clock. Left
+        // empty when the activity was not started by the launcher's button; the native side
+        // then counts from the moment the game library was loaded.
+        Intent intent = getIntent();
+        long launchUptime = intent != null ? intent.getLongExtra(EXTRA_LAUNCH_UPTIME, 0) : 0;
+        setEnvironment("SHADOWRECOMP_LAUNCH_UPTIME_MS", launchUptime > 0 ? Long.toString(launchUptime) : "");
+    }
+
+    /**
+     * Identifies this installation of the APK: the value changes with every install and
+     * update. The native side keeps it next to the Vulkan drivers it extracts from the APK,
+     * so that it only has to compare them with the APK again when the APK was replaced.
+     */
+    private String apkStamp() {
+        try {
+            PackageInfo info = getPackageManager().getPackageInfo(getPackageName(), 0);
+            return info.lastUpdateTime + "-" + info.getLongVersionCode() + "-" + new File(getApplicationInfo().sourceDir).length();
+        } catch (PackageManager.NameNotFoundException | RuntimeException exception) {
+            // Without a stamp the native side compares the drivers on every launch.
+            Log.w(TAG, "Could not identify the installed APK", exception);
+            return "";
+        }
     }
 
     private static void setEnvironment(String name, String value) {

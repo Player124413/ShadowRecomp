@@ -128,6 +128,12 @@ CONFIG_DEFINE("Video", uint32_t, MaxFrameLatency, 2, false);
 #ifdef __ANDROID__
 CONFIG_DEFINE_ENUM("Video", EAndroidVulkanDriver, VulkanDriver, EAndroidVulkanDriver::Auto, true);
 CONFIG_DEFINE_ENUM("Video", EAndroidRenderMode, RenderMode, EAndroidRenderMode::Auto, true);
+// Switches for troubleshooting (docs/ANDROID.md). Hidden: they are only kept in config.toml
+// once someone has written them there.
+//   BackgroundPipelineCompilation = false  creates all cached pipelines before the game starts
+//   PipelineDiskCache = false              does not keep the driver's pipeline cache on disk
+CONFIG_DEFINE_HIDDEN("Video", bool, BackgroundPipelineCompilation, true, true);
+CONFIG_DEFINE_HIDDEN("Video", bool, PipelineDiskCache, true, true);
 #endif
 
 CONFIG_DEFINE_HIDDEN("Codes", bool, QuickBoot, false, false);

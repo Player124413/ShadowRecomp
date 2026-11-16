@@ -49,9 +49,28 @@ namespace os::android
         return path;
     }
 
+    const std::filesystem::path& GetCacheDir()
+    {
+        static const std::filesystem::path path = []()
+        {
+            std::filesystem::path cache = PathFromEnvironment("SHADOWRECOMP_CACHE_DIR");
+            if (cache.empty() && !GetInternalFilesDir().empty())
+                cache = GetInternalFilesDir() / "cache";
+
+            return cache;
+        }();
+        return path;
+    }
+
     const char* GetAppVersion()
     {
         const char* value = getenv("SHADOWRECOMP_APP_VERSION");
         return (value != nullptr && value[0] != '\0') ? value : "unknown";
+    }
+
+    const char* GetApkStamp()
+    {
+        const char* value = getenv("SHADOWRECOMP_APK_STAMP");
+        return value != nullptr ? value : "";
     }
 }

@@ -569,6 +569,7 @@ public final class LauncherActivity extends Activity {
     }
 
     private void launchGame(boolean editControls) {
+        final long pressedAt = android.os.SystemClock.uptimeMillis();
         if (fileOperation) { showError(getString(R.string.storage_busy)); return; }
         if (!saveSettings()) return;
         InstallState current = inspectInstallation();
@@ -588,7 +589,7 @@ public final class LauncherActivity extends Activity {
                 return;
             }
         }
-        startActivity(new Intent(this, GameActivity.class));
+        startActivity(new Intent(this, GameActivity.class).putExtra(GameActivity.EXTRA_LAUNCH_UPTIME, pressedAt));
     }
 
     private void launchLayoutEditor() {

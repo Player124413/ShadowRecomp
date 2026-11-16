@@ -6,14 +6,18 @@
 #include <android/log.h>
 
 #include <atomic>
+#include <cmath>
 #include <cstdint>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <ctime>
 #include <dirent.h>
 #include <dlfcn.h>
 #include <filesystem>
+#include <memory>
 #include <mutex>
+#include <new>
 #include <pthread.h>
 #include <signal.h>
 #include <string>
@@ -176,8 +180,47 @@ static void WriteLogRecord(const char* tag, const char* func, const char* msg, s
         MonotonicSeconds() - s_startSeconds, GetTid(), tag != nullptr ? tag : "");
     if (plen < 0)
         plen = 0;
-    else if (plen > (int)sizeof(prefix))
-        plen = (int)sizeof(prefix);
+    else if (plen >= (int)sizeof(prefix))
+        plen = (int)sizeof(prefix) - 1;
+
+    if (msg == nullptr)
+        msgLen = 0;
+
+    // The stream is unbuffered, so every call on it is a write() of its own. The line goes
+    // out in one: that is one system call instead of up to seven, and a report the crash
+    // handler writes to the descriptor cannot end up in the middle of a line.
+    const size_t funcLen = func != nullptr ? strlen(func) : 0;
+    const size_t lineLen = size_t(plen) + (func != nullptr ? funcLen + 2 : 0) + 1 + msgLen + 1;
+
+    char stackLine[1024];
+    std::unique_ptr<char[]> heapLine;
+    char* line = stackLine;
+    if (lineLen > sizeof(stackLine))
+    {
+        heapLine.reset(new (std::nothrow) char[lineLen]);
+        line = heapLine.get();
+    }
+
+    if (line != nullptr)
+    {
+        char* at = line;
+        memcpy(at, prefix, size_t(plen));
+        at += plen;
+        if (func != nullptr)
+        {
+            *at++ = '[';
+            memcpy(at, func, funcLen);
+            at += funcLen;
+            *at++ = ']';
+        }
+        *at++ = ' ';
+        if (msgLen > 0)
+        {
+            memcpy(at, msg, msgLen);
+            at += msgLen;
+        }
+        *at++ = '\n';
+    }
 
     std::lock_guard<std::mutex> lock(s_logMutex);
     FILE* file = GetLogFileLocked();
@@ -197,17 +240,24 @@ static void WriteLogRecord(const char* tag, const char* func, const char* msg, s
         return;
     }
 
-    s_logBytes += size_t(plen) + (func != nullptr ? strlen(func) + 2 : 0) + msgLen + 2;
+    s_logBytes += lineLen;
 
+    if (line != nullptr)
+    {
+        fwrite(line, 1, lineLen, file);
+        return;
+    }
+
+    // No memory for the line: write it piece by piece.
     fwrite(prefix, 1, size_t(plen), file);
     if (func != nullptr)
     {
         fputc('[', file);
-        fwrite(func, 1, strlen(func), file);
+        fwrite(func, 1, funcLen, file);
         fputc(']', file);
     }
     fputc(' ', file);
-    if (msg != nullptr && msgLen > 0)
+    if (msgLen > 0)
         fwrite(msg, 1, msgLen, file);
     fputc('\n', file);
 }
@@ -710,6 +760,92 @@ void os::android::SetLogLocation(const std::string_view location)
         static_cast<unsigned long long>(s_runId.load(std::memory_order_acquire)),
         s_locations[nextIndex]);
     WriteLogRecord("[location]", nullptr, line, written > 0 ? size_t(written) : 0);
+}
+
+// ---------------------------------------------------------------------------
+// Startup timeline
+// ---------------------------------------------------------------------------
+
+struct LaunchTime
+{
+    double seconds;    // On the clock of MonotonicSeconds().
+    bool fromLauncher; // False: the launcher's time is unknown, counted from the library load.
+};
+
+// GameActivity publishes when Launch game was pressed in the launcher, as
+// SystemClock.uptimeMillis(), which is CLOCK_MONOTONIC. The value is only used if it lies
+// shortly before the load of this library: an activity that Android restores on its own
+// still carries the time of the launch it was created for.
+static const LaunchTime& GetLaunchTime()
+{
+    static const LaunchTime launch = []()
+    {
+        constexpr double LONGEST_LEAD = 60.0;
+
+        const char* value = getenv("SHADOWRECOMP_LAUNCH_UPTIME_MS");
+        if (value != nullptr && value[0] != '\0')
+        {
+            char* end = nullptr;
+            const double seconds = double(strtoll(value, &end, 10)) / 1000.0;
+            if (*end == '\0' && seconds > 0.0 && seconds <= s_startSeconds && s_startSeconds - seconds <= LONGEST_LEAD)
+                return LaunchTime{ seconds, true };
+        }
+
+        return LaunchTime{ s_startSeconds, false };
+    }();
+
+    return launch;
+}
+
+static std::mutex s_startupMutex;
+static double s_startupPhaseStart = s_startSeconds; // Guarded by s_startupMutex.
+
+// phaseSeconds < 0: an event, which has no duration.
+static void WriteStartupLine(const std::string_view what, double now, double phaseSeconds)
+{
+    const LaunchTime& launch = GetLaunchTime();
+    const long long sinceLaunch = llround((now - launch.seconds) * 1000.0);
+    const char* origin = launch.fromLauncher ? "since Launch game was pressed" : "since the game library was loaded";
+
+    char line[320];
+    int length;
+    if (phaseSeconds >= 0.0)
+    {
+        length = snprintf(line, sizeof(line), "%.*s: %lld ms (%lld ms %s)",
+            int(what.size()), what.data(), llround(phaseSeconds * 1000.0), sinceLaunch, origin);
+    }
+    else
+    {
+        length = snprintf(line, sizeof(line), "%.*s (%lld ms %s)",
+            int(what.size()), what.data(), sinceLaunch, origin);
+    }
+
+    if (length < 0)
+        return;
+
+    if (length >= int(sizeof(line)))
+        length = int(sizeof(line)) - 1;
+
+    __android_log_write(ANDROID_LOG_INFO, ANDROID_LOG_TAG, line);
+    WriteLogRecord("[startup]", nullptr, line, size_t(length));
+}
+
+void os::android::LogStartupPhase(const std::string_view phase)
+{
+    const double now = MonotonicSeconds();
+    double phaseStart;
+    {
+        std::lock_guard<std::mutex> lock(s_startupMutex);
+        phaseStart = s_startupPhaseStart;
+        s_startupPhaseStart = now;
+    }
+
+    WriteStartupLine(phase, now, now > phaseStart ? now - phaseStart : 0.0);
+}
+
+void os::android::LogStartupEvent(const std::string_view event)
+{
+    WriteStartupLine(event, MonotonicSeconds(), -1.0);
 }
 
 void os::android::LogHeartbeat()

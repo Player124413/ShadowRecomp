@@ -70,6 +70,12 @@ struct Video
 	static void WaitForGPU();
 	static void ComputeViewportDimensions();
 	static void Shutdown();
+
+	// Writes what this run has learned about pipelines to storage, if anything: the pipeline
+	// states the game used and, on Android, what the driver compiled for them. Meant for
+	// the moments a process may not outlive, such as an Android app going to the background.
+	static void SaveCaches();
+
 	static void BeginGameThreadProfiler();
 	static void EndGameThreadProfiler();
 };
