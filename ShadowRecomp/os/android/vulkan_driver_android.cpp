@@ -490,22 +490,28 @@ static bool ArmCustomVulkanStartup()
     return true;
 }
 
+// Several times the size of the largest driver. A file that claims more is not a driver,
+// and is not read into memory to find that out.
+static constexpr uint64_t MAX_WHOLE_FILE_SIZE = 256ull * 1024 * 1024;
+
 static bool ReadWholeFile(const std::filesystem::path &path, std::vector<uint8_t> &data)
 {
     FILE *file = fopen(path.c_str(), "rb");
     if (file == nullptr)
         return false;
 
-    fseek(file, 0, SEEK_END);
-    long size = ftell(file);
-    fseek(file, 0, SEEK_SET);
-    if (size <= 0)
+    // The size is asked of the file itself, and only of a regular one. Seeking to the end
+    // answers for anything that can be opened: for a directory ext4 reports 2^63 - 1, and
+    // a buffer of that size is an allocation failure that ends the process.
+    struct stat info {};
+    if (fstat(fileno(file), &info) != 0 || !S_ISREG(info.st_mode) ||
+        info.st_size <= 0 || uint64_t(info.st_size) > MAX_WHOLE_FILE_SIZE)
     {
         fclose(file);
         return false;
     }
 
-    data.resize(size_t(size));
+    data.resize(size_t(info.st_size));
     bool ok = fread(data.data(), 1, data.size(), file) == data.size();
     fclose(file);
     return ok;

@@ -395,13 +395,13 @@ void CompilePendingPipelinesForShader(uint64_t runtimeHash, GuestShader* shader,
 		return;
 	}
 
-	LOGFN("PipelineCache: Compiling {} deferred pipelines for {} runtime hash={:016X}",
-		pending.size(), isVertexShader ? "VS" : "PS", runtimeHash);
-
 	// This runs on the game's thread, in the middle of creating a shader: where pipelines
 	// are compiled in the background, these go there too rather than stall the game.
 	const bool inBackground = PrecompilesPipelinesInBackground();
 	BackgroundPipelineBatch batch;
+
+	LOGFN("PipelineCache: {} {} deferred pipelines for {} runtime hash={:016X}",
+		inBackground ? "Queueing" : "Compiling", pending.size(), isVertexShader ? "VS" : "PS", runtimeHash);
 
 	uint32_t redeferred = 0;
 	ankerl::unordered_dense::set<XXH64_hash_t> queued;

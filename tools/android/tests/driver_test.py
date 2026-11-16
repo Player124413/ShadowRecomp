@@ -650,5 +650,28 @@ d.launch(AUTO)
 check(read(readme) == text and read(media_readme) != "", "changed and emptied ones are written again")
 d.close()
 
+scenario("files that are not what their name says")
+d = stamped()
+d.launch(AUTO)
+# A directory where a file belongs. What seeking to the end of one reports depends on the
+# file system (ext4: 2^63 - 1), and must never become the size of a buffer.
+os.remove(stamp_path(d)); os.makedirs(stamp_path(d))
+r = d.launch(AUTO)
+check(r["rc"] == 0 and r["asset_opens"] == "4" and r["driver"] == N_BUNDLED, "a directory in place of the stamp: compared, launch unaffected")
+check(d.launch(AUTO)["asset_opens"] == "4", "and compared again on every launch while it is there")
+os.rmdir(stamp_path(d))
+check(d.launch(AUTO)["asset_opens"] == "4" and d.launch(AUTO)["asset_opens"] == "0", "once it is gone: one more comparison, then none")
+readme = os.path.join(d.imports, "readme.txt")
+os.remove(readme); os.makedirs(readme)
+r = d.launch(AUTO)
+check(r["rc"] == 0 and r["driver"] == N_BUNDLED and os.path.isdir(readme), "a directory in place of the readme: launch unaffected")
+# A file far too large to be a driver is turned down by its size, not read to find out.
+with open(os.path.join(d.imports, "vulkan.huge.so"), "wb") as f: f.truncate(300 * 1024 * 1024)
+r = d.launch(AUTO)
+check(r["rc"] == 0 and r["driver"] == N_BUNDLED, f"an oversized .so is not installed: {r['driver']}")
+check(os.path.isfile(os.path.join(d.imports, "rejected", "vulkan.huge.so")), "it lands in rejected/")
+check(not os.path.exists(os.path.join(d.turnip, "vulkan.huge.so")), "and not among the drivers")
+d.close()
+
 print(f"{checks} checks, {failures} failures")
 sys.exit(1 if failures else 0)

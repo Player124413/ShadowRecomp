@@ -105,8 +105,9 @@ The game starts while its graphics pipelines (the GPU programs it draws with) ar
 being prepared on background threads. What the driver compiles for them is kept in the
 app's cache and reused, so this is quick, except on the first start after
 
-- the app was installed or updated,
-- another Vulkan driver was selected, or
+- the app was installed,
+- the Vulkan driver changed: another one was selected, or an update of the app or of
+  Android replaced it,
 - the app's cache was cleared, by you or by Android when storage ran low.
 
 Then every pipeline is compiled from scratch. The game starts just as soon, but can
