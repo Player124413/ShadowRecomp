@@ -49,6 +49,7 @@
     <string name="launcher_quick_files">ファイル</string>
     <string name="launcher_exit">終了</string>
     <string name="launcher_exit_running">ゲームはバックグラウンドで実行中です。終了するとゲームも閉じ、保存していない進行状況は失われます。</string>
+    <string name="credits_title">移植版について</string>
     <string name="launcher_driver_pending">%1$d 個のドライバーパッケージが次回起動時にインストールされます。</string>
     <string name="launcher_driver_installed">インポート済みドライバー: %1$s</string>
     <string name="launcher_driver_builtin">同梱の Turnip ドライバーとシステムドライバーが利用可能です。インポート済みドライバーはありません。</string>
@@ -162,4 +163,5 @@
     <string name="native_install_message">ゲームファイルを検証してコピーしています。数分かかります。アプリを閉じないでください。</string>
     <string name="update_disabled">このビルドではアップデートの確認が設定されていません。</string>
     <string name="vulkan_startup_failed">グラフィックドライバーを起動できませんでした。ランチャーで別の Vulkan ドライバー（「システム」または「自動」）を選択し、ゲームを再起動してください。</string>
+    <string name="vulkan_feature_missing">このデバイスのグラフィックドライバーには、ゲームに必要な機能がありません: %1$s。ランチャーでこの GPU 用の別の Vulkan ドライバーを選択できる場合は、それを選択してください。選択できない場合、このデバイスではゲームを実行できません。</string>
 </resources>

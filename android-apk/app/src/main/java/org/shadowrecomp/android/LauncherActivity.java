@@ -14,7 +14,10 @@ import android.net.Uri;
 import android.os.Bundle;
 import android.os.ParcelFileDescriptor;
 import android.provider.DocumentsContract;
+import android.text.SpannableString;
 import android.text.TextUtils;
+import android.text.method.LinkMovementMethod;
+import android.text.util.Linkify;
 import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
@@ -152,6 +155,7 @@ public final class LauncherActivity extends Activity {
         ImmersiveWindow.hideSystemBars(this);
         loadSettings();
         maybeCheckForUpdates();
+        maybeShowCredits();
     }
 
     @Override
@@ -245,12 +249,21 @@ public final class LauncherActivity extends Activity {
         quick.addView(button(R.string.launcher_quick_files, view -> openFiles("game")), spaced(4, 0));
         pane.addView(quick);
 
+        LinearLayout footer = row();
+        TextView credits = text(getString(R.string.credits_title), 13, false);
+        credits.setTextColor(COLOR_TEXT_MUTED);
+        credits.setGravity(Gravity.CENTER);
+        credits.setPadding(0, dp(10), 0, dp(2));
+        credits.setOnClickListener(view -> showCredits());
+        footer.addView(credits, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+
         TextView exit = text(getString(R.string.launcher_exit), 13, false);
         exit.setTextColor(COLOR_TEXT_MUTED);
         exit.setGravity(Gravity.CENTER);
         exit.setPadding(0, dp(10), 0, dp(2));
         exit.setOnClickListener(view -> exitApp());
-        pane.addView(exit, matchWrap());
+        footer.addView(exit, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        pane.addView(footer, matchWrap());
         return scroll;
     }
 
@@ -426,6 +439,35 @@ public final class LauncherActivity extends Activity {
         if (driverSummary == null || driverSpinner == null || audioPresetSpinner == null) return;
         driverSummary.setText(getString(R.string.launcher_summary_driver, driverSpinner.getSelectedItem()));
         audioSummary.setText(getString(R.string.launcher_summary_audio, audioPresetSpinner.getSelectedItem()));
+    }
+
+    /**
+     * Shows who made the port, once after every installation or update of the app. The
+     * same window opens from the home pane at any time.
+     */
+    private void maybeShowCredits() {
+        long installed;
+        try {
+            installed = getPackageManager().getPackageInfo(getPackageName(), 0).lastUpdateTime;
+        } catch (android.content.pm.PackageManager.NameNotFoundException exception) {
+            installed = 1;
+        }
+        if (prefs.getLong("credits_shown_for", 0) == installed) return;
+        prefs.edit().putLong("credits_shown_for", installed).apply();
+        showCredits();
+    }
+
+    private void showCredits() {
+        SpannableString message = new SpannableString(getString(R.string.credits_message));
+        Linkify.addLinks(message, Linkify.WEB_URLS);
+        AlertDialog dialog = new AlertDialog.Builder(this)
+            .setTitle(R.string.credits_title)
+            .setMessage(message)
+            .setPositiveButton(android.R.string.ok, null)
+            .show();
+        // The links of a dialog message only open once the text view is told to follow them.
+        TextView messageView = dialog.findViewById(android.R.id.message);
+        if (messageView != null) messageView.setMovementMethod(LinkMovementMethod.getInstance());
     }
 
     private void exitApp() {

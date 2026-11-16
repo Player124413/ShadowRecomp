@@ -18,10 +18,13 @@ settings.
 ## Requirements
 
 - A 64-bit ARM (arm64-v8a) device with Android 10 or newer.
-- A GPU with a Vulkan 1.2 driver.
-    - Qualcomm Adreno: the app carries its own Mesa Turnip drivers, so an outdated
-      system driver is not a problem.
-    - Mali, PowerVR, Xclipse: the system driver is used, or one you import.
+- A GPU with a Vulkan 1.1 or newer driver that supports descriptor indexing
+  (`VK_EXT_descriptor_indexing`, part of Vulkan 1.2). The game checks this when it
+  starts and says what is missing if the driver will not do.
+    - Qualcomm Adreno 6xx and newer: the app carries its own Mesa Turnip drivers, so an
+      outdated system driver is not a problem.
+    - Mali, PowerVR, Xclipse, older Adreno: the system driver is used, or one you
+      import, and it has to have the above itself.
 - About 2.4 GiB of free storage for the game, plus room for the disc image while it is
   being installed.
 - Your own copy of Shadow the Hedgehog for the original Xbox, as with every other
@@ -249,9 +252,19 @@ cd android-apk
 
 ### Signing
 
-`assembleDebug` signs with the debug key of the machine it runs on. That is fine for
-your own device, but Android refuses to install an update signed with a different key,
-so APKs meant for other people should be signed with a key you keep:
+Android only installs an update over an app that was signed with the same key.
+Otherwise the old app has to be uninstalled first, and the installed game and the saves
+go with it.
+
+Debug builds (`assembleDebug`, `tools/android/build.sh` without a keystore, the GitHub
+workflow without the signing secrets) are therefore all signed with one key that is kept
+in the repository, `android-apk/app/debug.keystore`, instead of the key Gradle would
+make up on each machine. Any such build installs over any other. Only a build from
+before that key existed has to be uninstalled once.
+
+That key is public, so it says nothing about where an APK comes from: anyone can make
+an APK that Android accepts as an update of a debug build. Install debug builds only
+from a source you trust, and sign APKs meant for other people with a key you keep:
 
 ```bash
 keytool -genkeypair -v -keystore release.keystore -alias shadowrecomp \
@@ -304,10 +317,11 @@ answer with the build tree that the APK was made from:
 ### Tests
 
 The Android-specific code (driver selection and startup recovery, driver import, the
-staged game installation, the on-screen controls, logging, the pipeline cache kept on
-disk and the background compilation queue, and the launcher's handling of archives,
-disc images and storage copies) and the build tools in `tools/android` have tests that
-run on the build machine. They need neither the NDK nor a device nor the game files:
+check of what a Vulkan driver must support, the staged game installation, the on-screen
+controls, logging, the pipeline cache kept on disk and the background compilation queue,
+and the launcher's handling of archives, disc images and storage copies) and the build
+tools in `tools/android` have tests that run on the build machine. They need neither the
+NDK nor a device nor the game files:
 
 ```bash
 cmake -S tools/android/tests -B out/build/android-tests
@@ -401,8 +415,9 @@ Signing is optional and takes four more secrets:
 | `ANDROID_KEY_ALIAS`         | The alias of the key inside it                     |
 | `ANDROID_KEY_PASSWORD`      | The password of that key                           |
 
-Without them the APK is signed with a debug key that changes on every run. Such builds
-install, but cannot update one another.
+Without them the APK is signed with the debug key of the repository (see
+[Signing](#signing)): such builds update one another, but the key is public. The run
+page shows the fingerprint of the certificate an APK was signed with.
 
 ## Differences from the desktop versions
 

@@ -49,6 +49,7 @@
     <string name="launcher_quick_files">Dateien</string>
     <string name="launcher_exit">Beenden</string>
     <string name="launcher_exit_running">Das Spiel läuft noch im Hintergrund. Beim Beenden wird es geschlossen, nicht gespeicherter Fortschritt geht verloren.</string>
+    <string name="credits_title">Über den Port</string>
     <string name="launcher_driver_pending">%1$d Treiberpaket(e) werden beim nächsten Start installiert.</string>
     <string name="launcher_driver_installed">Importierter Treiber verfügbar: %1$s</string>
     <string name="launcher_driver_builtin">Mitgelieferte Turnip-Treiber und der Systemtreiber sind verfügbar. Kein importierter Treiber gefunden.</string>
@@ -162,4 +163,5 @@
     <string name="native_install_message">Die Spieldateien werden geprüft und kopiert. Das dauert einige Minuten; schließe die App nicht.</string>
     <string name="update_disabled">Die Update-Prüfung ist für diesen Build nicht eingerichtet.</string>
     <string name="vulkan_startup_failed">Der Grafiktreiber konnte nicht gestartet werden. Wähle im Launcher einen anderen Vulkan-Treiber (versuche „System“ oder „Auto“) und starte das Spiel erneut.</string>
+    <string name="vulkan_feature_missing">Dem Grafiktreiber dieses Geräts fehlt etwas, das das Spiel benötigt: %1$s. Falls der Launcher einen anderen Vulkan-Treiber für diese GPU anbietet, wähle ihn aus; andernfalls kann das Spiel auf diesem Gerät nicht laufen.</string>
 </resources>

@@ -49,6 +49,7 @@
     <string name="launcher_quick_files">Archivos</string>
     <string name="launcher_exit">Salir</string>
     <string name="launcher_exit_running">El juego sigue ejecutándose en segundo plano. Al salir se cerrará y se perderá el progreso no guardado.</string>
+    <string name="credits_title">Acerca del port</string>
     <string name="launcher_driver_pending">%1$d paquete(s) de controladores se instalarán en el próximo inicio.</string>
     <string name="launcher_driver_installed">Controlador importado disponible: %1$s</string>
     <string name="launcher_driver_builtin">Los controladores Turnip incluidos y el del sistema están disponibles. No se encontró ningún controlador importado.</string>
@@ -162,4 +163,5 @@
     <string name="native_install_message">Verificando y copiando los archivos del juego. Tarda unos minutos; no cierres la aplicación.</string>
     <string name="update_disabled">La búsqueda de actualizaciones no está configurada en esta compilación.</string>
     <string name="vulkan_startup_failed">No se pudo iniciar el controlador gráfico. Selecciona otro controlador Vulkan en el lanzador (prueba «Sistema» o «Auto») y vuelve a iniciar el juego.</string>
+    <string name="vulkan_feature_missing">Al controlador gráfico de este dispositivo le falta algo que el juego necesita: %1$s. Si el lanzador ofrece otro controlador Vulkan para esta GPU, selecciónalo; de lo contrario, el juego no puede funcionar en este dispositivo.</string>
 </resources>

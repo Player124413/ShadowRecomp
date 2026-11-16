@@ -49,6 +49,7 @@
     <string name="launcher_quick_files">Fichiers</string>
     <string name="launcher_exit">Quitter</string>
     <string name="launcher_exit_running">Le jeu tourne encore en arrière-plan. Quitter le fermera et la progression non sauvegardée sera perdue.</string>
+    <string name="credits_title">À propos du portage</string>
     <string name="launcher_driver_pending">%1$d paquet(s) de pilotes seront installés au prochain lancement.</string>
     <string name="launcher_driver_installed">Pilote importé disponible : %1$s</string>
     <string name="launcher_driver_builtin">Les pilotes Turnip intégrés et le pilote système sont disponibles. Aucun pilote importé trouvé.</string>
@@ -162,4 +163,5 @@
     <string name="native_install_message">Vérification et copie des fichiers du jeu. Cela prend quelques minutes ; ne fermez pas l\'application.</string>
     <string name="update_disabled">La recherche de mises à jour n\'est pas configurée pour cette version.</string>
     <string name="vulkan_startup_failed">Le pilote graphique n\'a pas pu démarrer. Sélectionnez un autre pilote Vulkan dans le lanceur (essayez « Système » ou « Auto ») et relancez le jeu.</string>
+    <string name="vulkan_feature_missing">Il manque au pilote graphique de cet appareil un élément dont le jeu a besoin : %1$s. Si le lanceur propose un autre pilote Vulkan pour ce GPU, sélectionnez-le ; sinon, le jeu ne peut pas fonctionner sur cet appareil.</string>
 </resources>

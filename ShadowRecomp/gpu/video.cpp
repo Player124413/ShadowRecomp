@@ -2662,6 +2662,13 @@ bool Video::CreateHostDevice(const char* sdlVideoDriver, bool graphicsApiRetry)
 				continue;
 			}
 
+#ifdef __ANDROID__
+			// Found out here, where it can be put in words, rather than by a renderer
+			// that fails somewhere in a driver without the features it is built on.
+			if (!AndroidVideo::CheckDeviceRequirements(g_interface.get()))
+				return false;
+#endif
+
 			g_device = g_interface->createDevice(Config::GraphicsDevice);
 			if (g_device != nullptr)
 			{

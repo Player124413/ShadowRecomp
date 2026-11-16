@@ -50,10 +50,24 @@ android {
         }
     }
 
-    // CI provides the release keystore through environment variables (see
-    // .github/workflows/build-android.yml); without them release builds stay unsigned.
-    if (System.getenv("ANDROID_KEYSTORE_FILE") != null) {
-        signingConfigs {
+    signingConfigs {
+        // Debug builds are signed with a key kept in the repository instead of the one
+        // Gradle makes up on each machine. Android only installs an update over an app
+        // signed with the same key: this way a debug build from any machine or CI run
+        // updates an earlier one without uninstalling it, which would delete the installed
+        // game and the saves. The key is public and proves nothing about who built an APK;
+        // builds meant for distribution get a private key (below).
+        debug {
+            storeFile file('debug.keystore')
+            storeType 'pkcs12'
+            storePassword 'android'
+            keyAlias 'androiddebugkey'
+            keyPassword 'android'
+        }
+
+        // CI provides the release keystore through environment variables (see
+        // .github/workflows/build-android.yml); without them release builds stay unsigned.
+        if (System.getenv("ANDROID_KEYSTORE_FILE") != null) {
             ci {
                 storeFile file(System.getenv("ANDROID_KEYSTORE_FILE"))
                 storePassword System.getenv("ANDROID_KEYSTORE_PASSWORD")

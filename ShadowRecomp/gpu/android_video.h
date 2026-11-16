@@ -11,9 +11,12 @@
 
 struct SDL_Window;
 
+#include <string>
+
 namespace plume
 {
     struct RenderDevice;
+    struct RenderInterface;
     struct RenderSwapChain;
 }
 
@@ -41,6 +44,13 @@ namespace AndroidVideo
     // Call after every frame handed to the swap chain. Notes the first one in the startup
     // timeline of log.txt: the end of the black screen the game starts on.
     void OnFramePresented();
+
+    // Asks the driver, before a device is created on it, for what the renderer cannot do
+    // without (see gpu/vulkan_requirements.h) and writes the answer to the log. Returns
+    // false if something is missing: GetMissingDeviceFeature() then says what, for the
+    // message the player gets instead of a renderer that fails further down the line.
+    bool CheckDeviceRequirements(plume::RenderInterface* renderInterface);
+    const std::string& GetMissingDeviceFeature();
 
     // Writes to the log which of the texture formats the renderer creates this GPU driver
     // supports. Nothing is enforced: unlike on desktop these vary between mobile GPUs, and

@@ -49,6 +49,7 @@
     <string name="launcher_quick_files">Arquivos</string>
     <string name="launcher_exit">Sair</string>
     <string name="launcher_exit_running">O jogo ainda está em execução em segundo plano. Sair vai fechá-lo e o progresso não salvo será perdido.</string>
+    <string name="credits_title">Sobre o port</string>
     <string name="launcher_driver_pending">%1$d pacote(s) de driver serão instalados na próxima inicialização.</string>
     <string name="launcher_driver_installed">Driver importado disponível: %1$s</string>
     <string name="launcher_driver_builtin">Os drivers Turnip incluídos e o driver do sistema estão disponíveis. Nenhum driver importado encontrado.</string>
@@ -162,4 +163,5 @@
     <string name="native_install_message">Verificando e copiando os arquivos do jogo. Isso leva alguns minutos; não feche o app.</string>
     <string name="update_disabled">A verificação de atualizações não está configurada nesta compilação.</string>
     <string name="vulkan_startup_failed">Não foi possível iniciar o driver gráfico. Selecione outro driver Vulkan no launcher (tente “Sistema” ou “Auto”) e inicie o jogo novamente.</string>
+    <string name="vulkan_feature_missing">Falta ao driver gráfico deste dispositivo algo de que o jogo precisa: %1$s. Se o launcher oferecer outro driver Vulkan para esta GPU, selecione-o; caso contrário, o jogo não pode funcionar neste dispositivo.</string>
 </resources>

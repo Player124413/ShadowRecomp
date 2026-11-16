@@ -12,12 +12,16 @@
 #include <plume_vulkan.h>
 
 #include "vulkan_pipeline_cache.h"
+#include "vulkan_requirements.h"
 
 #include <SDL3/SDL.h>
 #include <android/native_window.h>
 
 #include <atomic>
+#include <cstring>
 #include <mutex>
+#include <string>
+#include <vector>
 
 using namespace plume;
 
@@ -189,6 +193,97 @@ namespace AndroidVideo
         static std::atomic<bool> s_first{ true };
         if (s_first.exchange(false))
             os::android::LogStartupEvent("pipelines of the caches created");
+    }
+
+    static std::string s_missingDeviceFeature;
+
+    static VulkanRequirements::DeviceReport QueryDeviceRequirements(VkPhysicalDevice physicalDevice, const VkPhysicalDeviceProperties& properties)
+    {
+        VulkanRequirements::DeviceReport report;
+        report.apiVersion = properties.apiVersion;
+
+        uint32_t extensionCount = 0;
+        vkEnumerateDeviceExtensionProperties(physicalDevice, nullptr, &extensionCount, nullptr);
+
+        std::vector<VkExtensionProperties> extensions(extensionCount);
+        if (extensionCount > 0 && vkEnumerateDeviceExtensionProperties(physicalDevice, nullptr, &extensionCount, extensions.data()) < 0)
+            extensionCount = 0;
+
+        for (uint32_t i = 0; i < extensionCount && i < extensions.size(); i++)
+        {
+            if (strcmp(extensions[i].extensionName, VK_EXT_DESCRIPTOR_INDEXING_EXTENSION_NAME) == 0)
+                report.descriptorIndexingExtension = true;
+        }
+
+        // vkGetPhysicalDeviceFeatures2 came with Vulkan 1.1, and the driver only knows the
+        // structure of the features where it has the extension or Vulkan 1.2.
+        const bool canAsk = properties.apiVersion >= VulkanRequirements::MakeVersion(1, 1) && vkGetPhysicalDeviceFeatures2 != nullptr &&
+            (report.descriptorIndexingExtension || properties.apiVersion >= VulkanRequirements::MakeVersion(1, 2));
+
+        if (canAsk)
+        {
+            VkPhysicalDeviceDescriptorIndexingFeatures indexing = {};
+            indexing.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_INDEXING_FEATURES;
+
+            VkPhysicalDeviceFeatures2 features = {};
+            features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
+            features.pNext = &indexing;
+            vkGetPhysicalDeviceFeatures2(physicalDevice, &features);
+
+            report.featuresQueried = true;
+            report.runtimeDescriptorArray = indexing.runtimeDescriptorArray;
+            report.descriptorBindingPartiallyBound = indexing.descriptorBindingPartiallyBound;
+            report.descriptorBindingVariableDescriptorCount = indexing.descriptorBindingVariableDescriptorCount;
+        }
+
+        return report;
+    }
+
+    bool CheckDeviceRequirements(RenderInterface* renderInterface)
+    {
+        s_missingDeviceFeature.clear();
+
+        auto* vulkanInterface = static_cast<VulkanInterface*>(renderInterface);
+        if (vulkanInterface->instance == VK_NULL_HANDLE)
+            return true;
+
+        // A phone has one GPU. Should there ever be more, one that will do is enough.
+        uint32_t deviceCount = 0;
+        vkEnumeratePhysicalDevices(vulkanInterface->instance, &deviceCount, nullptr);
+
+        std::vector<VkPhysicalDevice> devices(deviceCount);
+        if (deviceCount == 0 || vkEnumeratePhysicalDevices(vulkanInterface->instance, &deviceCount, devices.data()) < 0)
+            return true; // Nothing to ask. Creating the device fails and reports that itself.
+
+        std::string missing;
+        for (uint32_t i = 0; i < deviceCount && i < devices.size(); i++)
+        {
+            VkPhysicalDeviceProperties properties = {};
+            vkGetPhysicalDeviceProperties(devices[i], &properties);
+
+            const VulkanRequirements::DeviceReport report = QueryDeviceRequirements(devices[i], properties);
+            missing = VulkanRequirements::FindMissingFeature(report);
+
+            LOGFN("Vulkan device \"{}\": Vulkan {}.{}, VK_EXT_descriptor_indexing {}, runtimeDescriptorArray {}, descriptorBindingPartiallyBound {}, descriptorBindingVariableDescriptorCount {}.",
+                properties.deviceName, VulkanRequirements::FormatVersion(properties.apiVersion), properties.apiVersion & 0xFFF,
+                report.descriptorIndexingExtension ? "offered" : "not offered",
+                report.runtimeDescriptorArray ? "yes" : "no",
+                report.descriptorBindingPartiallyBound ? "yes" : "no",
+                report.descriptorBindingVariableDescriptorCount ? "yes" : "no");
+
+            if (missing.empty())
+                return true;
+
+            LOGFN_ERROR("This Vulkan driver cannot run the game. It lacks: {}.", missing);
+        }
+
+        s_missingDeviceFeature = missing;
+        return false;
+    }
+
+    const std::string& GetMissingDeviceFeature()
+    {
+        return s_missingDeviceFeature;
     }
 
     void LogDeviceSupport(RenderDevice* device)

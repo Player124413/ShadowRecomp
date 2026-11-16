@@ -50,6 +50,8 @@
     <string name="launcher_quick_files">Файлы</string>
     <string name="launcher_exit">Выход</string>
     <string name="launcher_exit_running">Игра всё ещё работает в фоне. Выход закроет её, несохранённый прогресс будет потерян.</string>
+    <string name="credits_title">О порте</string>
+    <string name="credits_message">Порт на Android сделал Player1444.\nМой Telegram-канал: https://t.me/player1444ports\n\nЛаунчер взят из портов SansNope: https://github.com/SansNope?tab=repositories\n\nОгромное спасибо этому репозиторию: https://github.com/FoxWorkshop/ShadowRecomp\nБЕЗ него порта на Android не существовало бы.</string>
     <string name="launcher_driver_pending">Пакетов драйвера для установки при следующем запуске: %1$d.</string>
     <string name="launcher_driver_installed">Доступен импортированный драйвер: %1$s</string>
     <string name="launcher_driver_builtin">Доступны системный и встроенные драйверы Turnip. Импортированный драйвер не найден.</string>
@@ -164,4 +166,5 @@
     <string name="native_install_message">Проверка и копирование файлов игры. Это займёт несколько минут; не закрывайте приложение.</string>
     <string name="update_disabled">Проверка обновлений в этой сборке не настроена.</string>
     <string name="vulkan_startup_failed">Не удалось запустить графический драйвер. Выберите в лаунчере другой драйвер Vulkan (попробуйте «Системный» или «Авто») и запустите игру снова.</string>
+    <string name="vulkan_feature_missing">Графическому драйверу этого устройства не хватает того, что нужно игре: %1$s. Если лаунчер предлагает для этого GPU другой драйвер Vulkan, выберите его; иначе игра на этом устройстве работать не сможет.</string>
 </resources>

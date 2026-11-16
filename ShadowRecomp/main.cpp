@@ -42,6 +42,7 @@
 #error "main() must be renamed to SDL_main() on Android: do not define SDL_MAIN_HANDLED."
 #endif
 
+#include <gpu/android_video.h>
 #include <os/android/install_android.h>
 #include <os/android/jni_android.h>
 #include <os/android/storage_android.h>
@@ -437,9 +438,16 @@ int main(int argc, char* argv[])
         if (!Video::CreateHostDevice(sdlVideoDriver, graphicsApiRetry))
         {
 #ifdef __ANDROID__
-            // The usual cause on Android is the selected driver, which is changed in the launcher.
-            const auto message = os::android::LocaliseMessage("vulkan_startup_failed",
-                "The graphics driver could not be started. Select another Vulkan driver in the launcher (try System or Auto) and start the game again.");
+            // A driver without what the renderer is built on is told apart from one that
+            // failed to start: the usual cause of the latter is the selected driver, which
+            // is changed in the launcher.
+            const std::string& missingFeature = AndroidVideo::GetMissingDeviceFeature();
+            const auto message = !missingFeature.empty()
+                ? os::android::LocaliseMessage("vulkan_feature_missing",
+                    "The graphics driver of this device lacks something the game needs. If the launcher offers another Vulkan driver for this GPU, select it; otherwise the game cannot run on this device.",
+                    missingFeature)
+                : os::android::LocaliseMessage("vulkan_startup_failed",
+                    "The graphics driver could not be started. Select another Vulkan driver in the launcher (try System or Auto) and start the game again.");
             SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, GameWindow::GetTitle(), message.c_str(), GameWindow::s_pWindow);
 #else
             SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, GameWindow::GetTitle(), Localise("Video_BackendError").c_str(), GameWindow::s_pWindow);

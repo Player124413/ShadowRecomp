@@ -11,6 +11,9 @@ app/src/main/jniLibs/
 # Bundled Turnip drivers are fetched at build time (tools/android/fetch-drivers.sh).
 app/src/main/assets/bundled_driver/*.so
 
-# Signing material must never be committed.
+# Signing material must never be committed...
 *.jks
 *.keystore
+# ...except the one key that is meant to be public: every debug build is signed with it,
+# so that one build installs over another (see "Signing" in docs/ANDROID.md).
+!/app/debug.keystore

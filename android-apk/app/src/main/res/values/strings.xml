@@ -49,6 +49,8 @@
     <string name="launcher_quick_files">Files</string>
     <string name="launcher_exit">Exit</string>
     <string name="launcher_exit_running">The game is still running in the background. Exiting closes it, and unsaved progress is lost.</string>
+    <string name="credits_title">About the port</string>
+    <string name="credits_message">Android port by Player1444.\nMy Telegram channel: https://t.me/player1444ports\n\nThe launcher is taken from SansNope\'s ports: https://github.com/SansNope?tab=repositories\n\nHuge thanks to this repository: https://github.com/FoxWorkshop/ShadowRecomp\nWITHOUT it the Android port would not exist.</string>
     <string name="launcher_driver_pending">%1$d driver package(s) will be installed on the next launch.</string>
     <string name="launcher_driver_installed">Imported driver available: %1$s</string>
     <string name="launcher_driver_builtin">Bundled Turnip drivers and the system driver are available. No imported driver found.</string>
@@ -163,4 +165,5 @@
     <string name="native_install_message">Verifying and copying the game files. This takes a few minutes; do not close the app.</string>
     <string name="update_disabled">Update checks are not configured for this build.</string>
     <string name="vulkan_startup_failed">The graphics driver could not be started. Select another Vulkan driver in the launcher (try System or Auto) and start the game again.</string>
+    <string name="vulkan_feature_missing">The graphics driver of this device lacks something the game needs: %1$s. If the launcher offers another Vulkan driver for this GPU, select it; otherwise the game cannot run on this device.</string>
 </resources>

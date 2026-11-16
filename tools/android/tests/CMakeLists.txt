@@ -152,6 +152,10 @@ android_test_executable(work_queue_test SOURCES work_queue_test.cpp)
 target_link_libraries(work_queue_test PRIVATE Threads::Threads)
 add_test(NAME background_work_queue COMMAND work_queue_test)
 
+# --- Which Vulkan drivers the game accepts ------------------------------------------------
+android_test_executable(requirements_test SOURCES requirements_test.cpp)
+add_test(NAME vulkan_requirements COMMAND requirements_test)
+
 # --- The graphics driver's pipeline cache, kept on disk ---------------------------------
 # gpu/vulkan_pipeline_cache.cpp against a stand-in driver: the harness defines the three
 # volk entry points the code uses. Every launch of the app is one run of the harness.

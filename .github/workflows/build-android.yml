@@ -37,7 +37,7 @@ on:
       XBOXRECOMP2_TOKEN:
         required: false
       # Optional release signing, see docs/ANDROID.md. Without these the APK is signed
-      # with the runner's throwaway debug key: it installs, but cannot be updated in place.
+      # with the debug key kept in the repository (android-apk/app/debug.keystore).
       ANDROID_KEYSTORE_BASE64:
         required: false
       ANDROID_KEYSTORE_PASSWORD:
@@ -266,11 +266,23 @@ jobs:
             ./gradlew --no-daemon assembleRelease 2>&1 | tee "${RUNNER_TEMP}/logs/gradle.log"
             apk=./app/build/outputs/apk/release/app-release.apk
           else
-            echo "::warning title=Debug key::No signing keystore is configured: the APK is signed with a debug key, so it cannot be updated in place by a later build."
             ./gradlew --no-daemon assembleDebug 2>&1 | tee "${RUNNER_TEMP}/logs/gradle.log"
             apk=./app/build/outputs/apk/debug/app-debug.apk
           fi
           touch "${RUNNER_TEMP}/logs/gradle.ok"
+
+          # Android installs an update only over an app signed with the same key. The
+          # fingerprint on the run page tells whether two builds are.
+          apksigner="$(ls "${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}"/build-tools/*/apksigner 2>/dev/null | sort -V | tail -n 1 || true)"
+          certificate=""
+          if [ -n "${apksigner}" ]; then
+            certificate="$("${apksigner}" verify --print-certs "${apk}" 2>/dev/null | sed -n 's/^Signer #1 certificate SHA-256 digest: //p' | head -n 1 || true)"
+          fi
+          if [ -n "${ANDROID_KEYSTORE_BASE64}" ]; then
+            echo "::notice title=Signing::Signed with the key of the ANDROID_KEYSTORE secrets (certificate SHA-256 ${certificate:-unknown}). Installs over builds signed with the same key."
+          else
+            echo "::notice title=Signing::Signed with the debug key of the repository, android-apk/app/debug.keystore (certificate SHA-256 ${certificate:-unknown}). Installs over other builds signed with it, without uninstalling; a build made before that key existed has to be uninstalled once."
+          fi
           cp "${apk}" "../ShadowRecomp-Android-${{ matrix.arch.name }}-${CMAKE_PRESET}${ARTIFACT_SUFFIX}.apk"
           echo "::notice title=APK::$(du -h "${apk}" | cut -f1) $(basename "${apk}"), libmain.so $(du -h ./app/src/main/jniLibs/arm64-v8a/libmain.so | cut -f1)"
 

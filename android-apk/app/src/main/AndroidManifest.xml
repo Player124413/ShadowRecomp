@@ -2,11 +2,12 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     android:installLocation="auto">
 
-    <!-- The renderer needs Vulkan 1.2. Not marked as required: the bundled Turnip driver
-         provides it on Adreno devices whose system driver only reports Vulkan 1.1. -->
+    <!-- The renderer needs Vulkan 1.1 with descriptor indexing, which the game checks
+         itself when it starts (gpu/vulkan_requirements.h). Not marked as required: the
+         bundled Turnip driver provides it on Adreno devices whose system driver does not. -->
     <uses-feature
         android:name="android.hardware.vulkan.version"
-        android:version="0x00402000"
+        android:version="0x00401000"
         android:required="false" />
     <uses-feature
         android:name="android.hardware.vulkan.level"
