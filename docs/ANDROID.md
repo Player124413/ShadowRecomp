@@ -329,9 +329,9 @@ run, and the complete logs are attached to it as an artifact.
 Tick **stub_build** instead of giving a link. The run then goes through every step with
 a placeholder: a made-up disc image is downloaded and unpacked like a real one, and
 `tools/android/stub-recompiler.py` takes the place of XboxRecomp2 and writes empty
-functions. The result is a real APK, named `-stub`, whose launcher works and whose game
-says that it has no game code. This is for checking the workflow, the toolchain and the
-packaging after a change; it tells nothing about the recompiled game.
+functions. The result is a real APK, named `-stub`; starting the game in it only shows a
+message that the build has no game code. This is for checking the workflow, the
+toolchain and the packaging after a change; it tells nothing about the recompiled game.
 
 `.github/workflows/build-android-dev.yml` does this on every push to the branch the port
 is being developed on, or a build of the game if the `GAME_ISO_URL` secret is set. It is
