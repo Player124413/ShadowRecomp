@@ -23,7 +23,18 @@ namespace BcDecode
         BC3,  // DXT5: colour and interpolated transparency. Unpacks to RGBA.
         BC4,  // One channel. Unpacks to one byte per pixel.
         BC5,  // Two channels. Unpacks to two bytes per pixel.
-        BC7   // Colour and transparency in high quality. Unpacks to RGBA.
+        BC7,  // Colour and transparency in high quality. Unpacks to RGBA.
+
+        // The sRGB forms of the colour formats. The blocks unpack the same way; the
+        // colours are then turned from sRGB into linear, because the plain textures they
+        // are unpacked into are not sampled through the sRGB curve the way a GPU samples
+        // a block-compressed sRGB texture. Without that the picture comes out too bright.
+        // (There is no sRGB form of BC4 or BC5.) Transparency is not colour and is left
+        // alone.
+        BC1_SRGB,
+        BC2_SRGB,
+        BC3_SRGB,
+        BC7_SRGB
     };
 
     // The size in bytes of one block of 4 x 4 pixels, and of one pixel once unpacked.

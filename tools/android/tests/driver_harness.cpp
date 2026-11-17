@@ -1,7 +1,12 @@
 // One simulated launch of the app for ShadowRecomp/os/android/vulkan_driver_android.cpp,
 // built for the build machine. driver_test.py strings launches together.
 //
-//   driver_harness <driver 0..6> <render mode 0..2> <reach swapchain 0|1>
+//   driver_harness <driver 0..6> <render mode 0..2> <reach swapchain 0|1> [health]
+//
+// [health] is what the renderer's health checkpoints of this launch report, if anything:
+// "broken:<n>" calls AndroidNoteBrokenRenderDriver(n), "healthy" AndroidNoteRenderHealthy(false),
+// "sustained" AndroidNoteRenderHealthy(true). It is reported after the swapchain is reached,
+// as in the real flow.
 //
 // Directories and the APK stamp come from the SHADOWRECOMP_* variables (the real
 // storage_android.cpp reads them), system properties from PROP_<name with dots as
@@ -89,7 +94,7 @@ namespace os::android
 
 int main(int argc, char** argv)
 {
-    if (argc != 4) return 2;
+    if (argc < 4 || argc > 5) return 2;
     const auto driver = EAndroidVulkanDriver(atoi(argv[1]));
     const auto mode = EAndroidRenderMode(atoi(argv[2]));
     const bool reachSwapchain = atoi(argv[3]) != 0;
@@ -119,6 +124,16 @@ int main(int argc, char** argv)
     {
         AndroidMarkVulkanStartupSuccessful();
         AndroidMarkVulkanStartupSuccessful(); // called every frame
+
+        if (argc > 4)
+        {
+            if (strncmp(argv[4], "broken:", 7) == 0)
+                AndroidNoteBrokenRenderDriver(uint32_t(strtoul(argv[4] + 7, nullptr, 10)));
+            else if (strcmp(argv[4], "healthy") == 0)
+                AndroidNoteRenderHealthy(false);
+            else if (strcmp(argv[4], "sustained") == 0)
+                AndroidNoteRenderHealthy(true);
+        }
     }
 
     const char* tu = getenv("TU_DEBUG");

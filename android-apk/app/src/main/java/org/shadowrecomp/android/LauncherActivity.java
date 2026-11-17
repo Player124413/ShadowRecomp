@@ -112,6 +112,7 @@ public final class LauncherActivity extends Activity {
     private TextView updateStatus;
     private Button playButton;
     private Button updateButton;
+    private Button driverRecoveryButton;
     private Spinner driverSpinner;
     private Spinner renderSpinner;
     private Spinner audioPresetSpinner;
@@ -327,6 +328,16 @@ public final class LauncherActivity extends Activity {
     private void buildGraphicsSection(LinearLayout section) {
         driverStatus = statusText();
         section.addView(driverStatus);
+        // Shown while the game runs on a driver other than the configured one because the
+        // configured one rendered incorrectly (os/android/vulkan_driver_android.cpp writes
+        // the marker this reads). It deletes the marker: the next launch runs the
+        // configured driver again, whatever it renders like.
+        driverRecoveryButton = button(R.string.launcher_driver_render_dismiss, view -> {
+            new File(getFilesDir(), "vulkan_render_recovery.txt").delete();
+            refreshStatuses();
+        });
+        driverRecoveryButton.setVisibility(View.GONE);
+        section.addView(driverRecoveryButton);
         driverSpinner = spinner(R.array.driver_labels);
         settingRow(section, R.string.launcher_driver, driverSpinner);
         renderSpinner = spinner(R.array.render_mode_labels);
@@ -518,14 +529,41 @@ public final class LauncherActivity extends Activity {
         File installedMarker = new File(getFilesDir(), "turnip/last_imported_driver.txt");
         // Both are written by os/android/vulkan_driver_android.cpp.
         File recoveryMarker = new File(getFilesDir(), "vulkan_startup_state.txt");
+        File renderMarker = new File(getFilesDir(), "vulkan_render_recovery.txt");
         int pending = 0;
         for (File importDir : AppStorage.driverImportDirs(this)) {
             pending += countDriverPackages(importDir);
         }
         String imported = readFirstLine(installedMarker);
+        driverRecoveryButton.setVisibility(View.GONE);
         if (recoveryMarker.isFile()) {
             driverStatus.setText(R.string.launcher_driver_recovery);
             driverStatus.setTextColor(COLOR_DANGER);
+        } else if (renderMarker.isFile()) {
+            // The game could not be rendered correctly with the driver the setting selects.
+            // While an override line is in the marker, the game runs on the other driver
+            // automatically; the button above deletes the marker to insist on the setting.
+            Map<String, String> marker = readKeyValues(renderMarker);
+            int refused = 0;
+            try {
+                refused = Integer.parseInt(marker.getOrDefault("broken_refused", "0"));
+            } catch (NumberFormatException ignored) {}
+            boolean bothBroken = "1".equals(marker.get("both_broken"));
+            String override = marker.getOrDefault("override", "-");
+            if (bothBroken) {
+                driverStatus.setText(getString(R.string.launcher_driver_render_both_broken, refused));
+                driverStatus.setTextColor(COLOR_DANGER);
+            } else if ("custom".equals(override)) {
+                driverStatus.setText(getString(R.string.launcher_driver_render_override_custom, refused));
+                driverStatus.setTextColor(COLOR_WARNING);
+            } else if ("system".equals(override)) {
+                driverStatus.setText(getString(R.string.launcher_driver_render_override_system, refused));
+                driverStatus.setTextColor(COLOR_WARNING);
+            } else {
+                driverStatus.setText(getString(R.string.launcher_driver_render_broken_none, refused));
+                driverStatus.setTextColor(COLOR_DANGER);
+            }
+            driverRecoveryButton.setVisibility(View.VISIBLE);
         } else if (pending > 0) {
             driverStatus.setText(getString(R.string.launcher_driver_pending, pending));
             driverStatus.setTextColor(COLOR_TEXT_SECONDARY);
@@ -1757,6 +1795,21 @@ public final class LauncherActivity extends Activity {
             String line = reader.readLine();
             return line == null ? "" : line.trim();
         } catch (IOException ignored) { return ""; }
+    }
+
+    // The key=value files written by the native side (os/android/vulkan_driver_android.cpp).
+    private static Map<String, String> readKeyValues(File file) {
+        Map<String, String> result = new LinkedHashMap<>();
+        if (!file.isFile()) return result;
+        try (BufferedReader reader = new BufferedReader(new InputStreamReader(
+            new FileInputStream(file), StandardCharsets.UTF_8))) {
+            String line;
+            while ((line = reader.readLine()) != null) {
+                int equals = line.indexOf('=');
+                if (equals > 0) result.put(line.substring(0, equals).trim(), line.substring(equals + 1).trim());
+            }
+        } catch (IOException ignored) {}
+        return result;
     }
 
     private static File findFile(File root, String name, int depth) {

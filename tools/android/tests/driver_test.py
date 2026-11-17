@@ -65,7 +65,7 @@ class Device:
                 return line[6:]
         return "?"
 
-    def launch(self, driver, mode=M_AUTO, ok=True):
+    def launch(self, driver, mode=M_AUTO, ok=True, health=None):
         env = {"PATH": os.environ.get("PATH", ""),
                "SHADOWRECOMP_INTERNAL_DIR": self.internal,
                "SHADOWRECOMP_EXTERNAL_DIR": self.external,
@@ -76,8 +76,10 @@ class Device:
         for k, v in self.props.items():
             env["PROP_" + k.replace(".", "_")] = v
         env.update(self.extra_env)
-        p = subprocess.run([HARNESS, str(driver), str(mode), "1" if ok else "0"], env=env,
-                           capture_output=True, text=True, timeout=60)
+        argv = [HARNESS, str(driver), str(mode), "1" if ok else "0"]
+        if health is not None:
+            argv.append(health)
+        p = subprocess.run(argv, env=env, capture_output=True, text=True, timeout=60)
         out = dict(line.split("=", 1) for line in p.stdout.splitlines() if "=" in line)
         out["rc"] = p.returncode
         out["log"] = p.stderr
@@ -633,6 +635,140 @@ check(not os.path.exists(stamp_path(d)), "but the stamp is gone")
 r = d.launch(BUNDLED, ok=True)
 check(r["custom"] == "1" and r["asset_opens"] == "4", "the launch after compares")
 check(installed(d, N_BUNDLED) == b"ELF:" + N_BUNDLED.encode(), "and repairs the copy")
+d.close()
+
+# ---------------------------------------------------------------------------
+# Render health. A driver that refuses to build the game's pipelines renders
+# garbage or nothing (system drivers on several Adreno devices in the field).
+# The next launch then runs the other driver path automatically, without the
+# configuration being rewritten; a proven override replaces the report, and a
+# healthy run of the configured selection clears it.
+
+def recovery_path(device):
+    return os.path.join(device.internal, "vulkan_render_recovery.txt")
+
+scenario("render recovery: a broken system driver is replaced by the bundled one")
+d = stamped()
+d.launch(AUTO)  # baseline: bundled custom driver is what the config gives
+r = d.launch(SYSTEM, health="broken:376")
+check(r["custom"] == "0" and r["driver"] == "-", "the broken launch itself ran the system driver")
+marker = read(recovery_path(d))
+check("broken_kind=system" in marker and "broken_refused=376" in marker and "broken_driver=-" in marker,
+      f"the failure is recorded:\n{marker}")
+r = d.launch(SYSTEM)  # the next launch is forced onto the custom driver
+check(r["custom"] == "1" and r["driver"] == N_BUNDLED, f"forced onto the bundled driver: {r['driver']}")
+check("override=custom" in read(recovery_path(d)) and "override_pending=1" in read(recovery_path(d)),
+      "that attempt is tracked")
+r = d.launch(SYSTEM)  # an unproven attempt counts as failed: the override stops
+check(r["custom"] == "0" and r["driver"] == "-", "both broken: the configured driver runs again")
+check("both_broken=1" in read(recovery_path(d)) and "override=-" in read(recovery_path(d)),
+      "the report says both failed and forces nothing")
+check(d.launch(SYSTEM)["custom"] == "0", "it stays that way")
+d.close()
+
+scenario("render recovery: a proven override stays in use")
+d = stamped()
+d.launch(AUTO)
+d.launch(SYSTEM, health="broken:100")
+r = d.launch(SYSTEM, health="sustained")  # the forced custom run renders fine for a while
+check(r["custom"] == "1", "the override runs")
+marker = read(recovery_path(d))
+check("override=custom" in marker and "override_pending=0" in marker and "both_broken=0" in marker
+      and "broken_kind=system" in marker and "broken_refused=100" in marker, f"proven:\n{marker}")
+r = d.launch(SYSTEM, health="sustained")  # and stays in use
+check(r["custom"] == "1", "still on the override")
+os.remove(recovery_path(d))  # the launcher notice can be dismissed by deleting the file
+r = d.launch(SYSTEM)
+check(r["custom"] == "0" and not os.path.exists(recovery_path(d)), "dismissed: the setting decides again")
+d.close()
+
+scenario("render recovery: a proven override survives a short run")
+d = stamped()
+d.launch(AUTO)
+d.launch(SYSTEM, health="broken:100")
+d.launch(SYSTEM, health="sustained")  # the override is proven
+check("override_proven=1" in read(recovery_path(d)), "the proof is recorded")
+r = d.launch(SYSTEM)  # closed before the renderer could report: no health note
+check(r["custom"] == "1", "the override runs")
+check("override_pending=1" in read(recovery_path(d)), "tracked as unreported")
+r = d.launch(SYSTEM)  # the next boot finds it unreported, but proven from earlier
+check(r["custom"] == "1", "the override is kept")
+marker = read(recovery_path(d))
+check("both_broken=0" in marker and "override=custom" in marker and "override_proven=1" in marker,
+      f"not a failure (the pending bit is this run's own tracker):\n{marker}")
+d.close()
+
+scenario("render recovery: a healthy configured selection clears the report")
+d = stamped()
+d.launch(SYSTEM, health="broken:100")
+check("broken_kind=system" in read(recovery_path(d)), "the failure is recorded")
+r = d.launch(AUTO, health="healthy")  # the selection changed; the bundled driver is healthy
+check(r["custom"] == "1", "the new selection runs")
+check(not os.path.exists(recovery_path(d)), "the report for the old selection is retired")
+d.close()
+
+scenario("render recovery: a broken custom driver falls back to the system one")
+d = stamped()
+r = d.launch(AUTO, health="broken:212")
+check(r["custom"] == "1", "the broken launch ran the bundled driver")
+marker = read(recovery_path(d))
+check("broken_kind=custom" in marker and "broken_driver=" + N_BUNDLED in marker,
+      f"the report names the bundled driver:\n{marker}")
+r = d.launch(AUTO, health="sustained")  # forced onto the system driver; it renders fine
+check(r["custom"] == "0" and r["driver"] == "-", "forced onto the system driver")
+marker = read(recovery_path(d))
+check("override=system" in marker and "override_pending=0" in marker and "both_broken=0" in marker,
+      "the override is proven and stays")
+d.close()
+
+scenario("render recovery: a broken override run means both directions failed")
+d = stamped()
+d.launch(SYSTEM, health="broken:50")
+r = d.launch(SYSTEM, health="broken:50")  # the forced custom run renders badly too
+check(r["custom"] == "1", "the override ran")
+marker = read(recovery_path(d))
+check("both_broken=1" in marker and "override=-" in marker and "override_pending=0" in marker,
+      f"both directions failed:\n{marker}")
+r = d.launch(SYSTEM)
+check(r["custom"] == "0", "nothing is forced any more")
+d.close()
+
+scenario("render recovery: nothing imported or bundled means no override")
+d = Device(props=MALI, assets=False)  # a GPU family without bundled drivers, and no APK assets
+r = d.launch(AUTO, health="broken:90")
+check(r["custom"] == "0" and r["driver"] == "-", "Mali runs the system driver")
+marker = read(recovery_path(d))
+check("broken_kind=system" in marker and "override=-" in marker, f"reported, but nothing to offer:\n{marker}")
+r = d.launch(AUTO)
+check(r["custom"] == "0" and "override=-" in read(recovery_path(d)), "the next launch is unchanged")
+d.close()
+
+scenario("render recovery: an imported driver is offered as the alternative on Mali")
+d = Device(props=MALI)
+os.makedirs(d.imports)
+with open(os.path.join(d.imports, "vulkan.panvk_test.so"), "wb") as f: f.write(b"PANVK")
+r = d.launch(SYSTEM, health="broken:77")
+check("broken_kind=system" in read(recovery_path(d)), "the system driver failed")
+r = d.launch(SYSTEM)  # the next launch imports the driver and is forced onto it
+check(r["custom"] == "1" and r["driver"] == "vulkan.panvk_test.so", f"and used: {r['driver']}")
+check("override=custom" in read(recovery_path(d)) and "override_pending=1" in read(recovery_path(d)), "tracked")
+d.close()
+
+scenario("render recovery: an invalid record is removed")
+d = stamped()
+d.launch(AUTO)
+with open(recovery_path(d), "w") as f:
+    f.write("version=99\noverride=custom\n")
+r = d.launch(AUTO)
+check(r["custom"] == "1" and r["driver"] == N_BUNDLED, "the configured driver runs")
+check(not os.path.exists(recovery_path(d)), "the invalid record is gone")
+# A record naming a driver name that cannot be safe has the name dropped, not trusted.
+with open(recovery_path(d), "w") as f:
+    f.write("version=1\nconfigured_driver=0\nconfigured_render_mode=0\n"
+            "broken_kind=custom\nbroken_refused=40\nbroken_driver=../evil.so\noverride=system\noverride_pending=0\nboth_broken=0\n")
+r = d.launch(AUTO)
+check(r["custom"] == "0" and r["driver"] == "-", "the override forces the system driver")
+check("evil" not in read(recovery_path(d)), "the tampered name did not survive")
 d.close()
 
 scenario("readme is written only when it differs")

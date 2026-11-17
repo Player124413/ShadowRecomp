@@ -490,6 +490,435 @@ static bool ArmCustomVulkanStartup()
     return true;
 }
 
+// ---------------------------------------------------------------------------
+// Render recovery
+//
+// The boot recovery above guards against a driver that crashes or hangs while it is
+// loaded. A driver can fail in a quieter way: it stays up, but refuses to create the
+// game's graphics pipelines, and the picture comes out missing parts or as garbage. The
+// renderer counts the refusals (AndroidVideo) and reports a driver that refuses en masse
+// to AndroidNoteBrokenRenderDriver(), which records the failure in a marker file. The
+// next launch then runs the other driver path - the bundled Turnip on Adreno, the system
+// driver when a custom one failed - without touching the configured selection. While the
+// alternative keeps drawing correctly it stays in use, with a notice in the launcher; a
+// run that ends before proving itself (crash, or the app was closed) counts as failed,
+// and when both paths have failed the forcing stops: the configured selection runs and
+// the launcher notice asks for the log instead.
+//
+// The marker is a small key=value file next to the boot-recovery marker:
+//
+//   version=1
+//   configured_driver=<u>           the selection the record belongs to; a change of the
+//   configured_render_mode=<u>      configured selection retires the record
+//   broken_kind=system|custom       which driver path was reported broken
+//   broken_refused=<n>              pipelines it refused when it was reported
+//   broken_driver=<name>            the custom driver file, when broken_kind=custom
+//   override=system|custom          the alternative this launch is being run with
+//   override_pending=1              the override run has not been proven healthy yet
+//   both_broken=1                   both paths failed; nothing is forced any more
+// ---------------------------------------------------------------------------
+
+static constexpr const char *RENDER_RECOVERY_FILE = "vulkan_render_recovery.txt";
+
+// Defined further down, where the boot recovery and the import use them too.
+static bool ReadWholeFile(const std::filesystem::path &path, std::vector<uint8_t> &data);
+static bool WriteWholeFile(const std::filesystem::path &path, const void *data, size_t size);
+static bool IsSafeDriverFileName(const std::string &driverName);
+static std::string GetCustomDriverName(const std::string &turnipDir);
+
+struct RenderRecoveryState
+{
+    EAndroidVulkanDriver configuredDriver = EAndroidVulkanDriver::Auto;
+    EAndroidRenderMode configuredRenderMode = EAndroidRenderMode::Auto;
+    bool brokenKnown = false;
+    bool brokenCustom = false;   // Which driver path was reported broken.
+    uint32_t brokenRefused = 0;
+    std::string brokenDriver;    // The custom driver's file name, when brokenCustom.
+    int overrideKind = 0;        // 0: none, 1: system, 2: custom.
+    bool overridePending = false;
+    bool overrideProven = false; // A sustained healthy run on the override happened once.
+    bool bothBroken = false;
+};
+
+// This launch runs with a render-recovery override, set before the driver is loaded.
+static bool g_renderRecoveryForcedSystem;
+static bool g_renderRecoveryForcedCustom;
+
+// The file name of the custom driver this process runs on, for the record of a failure.
+static std::string g_activeCustomDriverName;
+
+static std::filesystem::path GetRenderRecoveryPath()
+{
+    const std::filesystem::path &internalDir = os::android::GetInternalFilesDir();
+    return internalDir.empty() ? std::filesystem::path() : internalDir / RENDER_RECOVERY_FILE;
+}
+
+static bool RenderRecoveryMatchesConfig(const RenderRecoveryState &state)
+{
+    return state.configuredDriver == g_configuredVulkanDriver &&
+        state.configuredRenderMode == g_configuredRenderMode;
+}
+
+static bool ReadRenderRecoveryState(RenderRecoveryState &state)
+{
+    const std::filesystem::path path = GetRenderRecoveryPath();
+    if (path.empty())
+        return false;
+
+    std::vector<uint8_t> contents;
+    if (!ReadWholeFile(path, contents) || contents.empty() || contents.size() > 4096)
+        return false;
+
+    unsigned version = 0;
+    unsigned configuredDriver = unsigned(EAndroidVulkanDriver::Imported) + 1;
+    unsigned configuredRenderMode = unsigned(EAndroidRenderMode::Sysmem) + 1;
+
+    RenderRecoveryState parsed;
+    for (std::string_view rest(std::string_view(reinterpret_cast<const char *>(contents.data()), contents.size())); !rest.empty();)
+    {
+        const size_t lineEnd = rest.find('\n');
+        const std::string_view line = rest.substr(0, lineEnd);
+        rest = lineEnd == std::string_view::npos ? std::string_view() : rest.substr(lineEnd + 1);
+
+        const size_t equals = line.find('=');
+        if (equals == std::string_view::npos)
+            continue;
+
+        const std::string_view key = line.substr(0, equals);
+        const std::string_view value = line.substr(equals + 1);
+
+        if (key == "version")
+            version = unsigned(atoi(std::string(value).c_str()));
+        else if (key == "configured_driver")
+            configuredDriver = unsigned(atoi(std::string(value).c_str()));
+        else if (key == "configured_render_mode")
+            configuredRenderMode = unsigned(atoi(std::string(value).c_str()));
+        else if (key == "broken_kind")
+        {
+            parsed.brokenKnown = value == "system" || value == "custom";
+            parsed.brokenCustom = value == "custom";
+        }
+        else if (key == "broken_refused")
+            parsed.brokenRefused = uint32_t(strtoul(std::string(value).c_str(), nullptr, 10));
+        else if (key == "broken_driver")
+        {
+            if (value != "-")
+                parsed.brokenDriver = std::string(value);
+        }
+        else if (key == "override")
+            parsed.overrideKind = value == "system" ? 1 : value == "custom" ? 2 : 0;
+        else if (key == "override_pending")
+            parsed.overridePending = value == "1";
+        else if (key == "override_proven")
+            parsed.overrideProven = value == "1";
+        else if (key == "both_broken")
+            parsed.bothBroken = value == "1";
+    }
+
+    if (version != 1 || configuredDriver > unsigned(EAndroidVulkanDriver::Imported) ||
+        configuredRenderMode > unsigned(EAndroidRenderMode::Sysmem))
+    {
+        return false;
+    }
+
+    parsed.configuredDriver = EAndroidVulkanDriver(configuredDriver);
+    parsed.configuredRenderMode = EAndroidRenderMode(configuredRenderMode);
+    if (!parsed.brokenDriver.empty() && !IsSafeDriverFileName(parsed.brokenDriver))
+        parsed.brokenDriver.clear();
+
+    state = std::move(parsed);
+    return true;
+}
+
+static bool WriteRenderRecoveryState(const RenderRecoveryState &state)
+{
+    const std::filesystem::path path = GetRenderRecoveryPath();
+    if (path.empty())
+        return false;
+
+    const std::string contents = fmt::format(
+        "version=1\nconfigured_driver={}\nconfigured_render_mode={}\n"
+        "broken_kind={}\nbroken_refused={}\nbroken_driver={}\n"
+        "override={}\noverride_pending={}\noverride_proven={}\nboth_broken={}\n",
+        unsigned(state.configuredDriver), unsigned(state.configuredRenderMode),
+        state.brokenKnown ? (state.brokenCustom ? "custom" : "system") : "-",
+        state.brokenRefused, state.brokenDriver.empty() ? "-" : state.brokenDriver,
+        state.overrideKind == 1 ? "system" : state.overrideKind == 2 ? "custom" : "-",
+        state.overridePending ? 1 : 0, state.overrideProven ? 1 : 0, state.bothBroken ? 1 : 0);
+
+    return WriteWholeFile(path, contents.data(), contents.size());
+}
+
+static bool RemoveRenderRecoveryState()
+{
+    const std::filesystem::path path = GetRenderRecoveryPath();
+    if (path.empty())
+        return false;
+
+    return unlink(path.c_str()) == 0 || errno == ENOENT;
+}
+
+// Whether forcing the custom driver path could load anything: the bundled Turnip where it
+// runs (Adreno, and unknown GPUs are given the same chance Auto gives them), or a driver
+// the user imported. Mirrors what the Auto branch below resolves to.
+static bool CustomDriverAvailable(const std::string &turnipDir, EAndroidGpuFamily gpuFamily)
+{
+    struct stat buf {};
+
+    const bool bundledOffered = gpuFamily == EAndroidGpuFamily::Adreno || gpuFamily == EAndroidGpuFamily::Unknown;
+    if (bundledOffered && stat((turnipDir + BUNDLED_DRIVER_NAME).c_str(), &buf) == 0 && S_ISREG(buf.st_mode))
+        return true;
+
+    const std::string imported = GetCustomDriverName(turnipDir);
+    return imported != BUNDLED_DRIVER_NAME && IsSafeDriverFileName(imported) &&
+        stat((turnipDir + imported).c_str(), &buf) == 0 && S_ISREG(buf.st_mode);
+}
+
+// The override of a launch that ended before its renderer could report on it - a crash,
+// or the app was closed - was never proven to work and is not offered again: as far as
+// anyone can tell both directions have failed. Runs even on a launch the boot recovery
+// has forced onto the safe path: the note it takes is about the previous launch, and it
+// is what stops an override that crashes from being forced again and again.
+static void ResolveRenderRecoveryPendingOverride()
+{
+    RenderRecoveryState state;
+    if (!ReadRenderRecoveryState(state) || !RenderRecoveryMatchesConfig(state) || !state.overridePending)
+        return;
+
+    state.overridePending = false;
+
+    if (state.overrideProven)
+    {
+        // A proven override is not unproven by a launch that ended before the renderer
+        // could report - the player may simply have closed the game early. The boot
+        // recovery still covers an override that crashes.
+        LOG("Render recovery: the previous launch on the alternative graphics driver ended before it could "
+            "report; the driver is proven from earlier launches, the override stays.");
+    }
+    else
+    {
+        state.overrideKind = 0;
+        state.bothBroken = true;
+
+        LOGF_WARNING("Render recovery: the alternative graphics driver of the previous launch did not run long enough "
+            "to prove itself; treating it as failed. The configured selection ({}) is used from here on.",
+            VulkanDriverName(state.configuredDriver));
+    }
+
+    if (!WriteRenderRecoveryState(state))
+        LOG_ERROR("Render recovery: the state file could not be written.");
+}
+
+// Decides, from what the previous launches recorded, whether this launch runs the other
+// driver path than the configured selection would. Called with the drivers provisioned,
+// before the selection below is resolved. Boot recovery wins over anything here.
+static void ApplyRenderRecoveryOverride(const std::string &turnipDir, EAndroidGpuFamily gpuFamily)
+{
+    RenderRecoveryState state;
+    if (!ReadRenderRecoveryState(state))
+    {
+        // A record that cannot be parsed is worse than none: the launcher would show it.
+        const std::filesystem::path path = GetRenderRecoveryPath();
+        std::error_code ec;
+        if (!path.empty() && std::filesystem::exists(path, ec))
+            RemoveRenderRecoveryState();
+        return;
+    }
+
+    if (!RenderRecoveryMatchesConfig(state))
+    {
+        // The selection changed since the record: what it says no longer applies.
+        RemoveRenderRecoveryState();
+        return;
+    }
+
+    if (state.bothBroken)
+        return;
+
+    // Which driver path the selection itself takes on this GPU. Auto is custom everywhere
+    // except on a GPU family the bundled Turnip does not cover without an imported driver,
+    // mirroring the resolution below.
+    bool naturalCustom;
+    if (g_runtimeVulkanDriver == EAndroidVulkanDriver::System)
+    {
+        naturalCustom = false;
+    }
+    else if (g_runtimeVulkanDriver != EAndroidVulkanDriver::Auto)
+    {
+        naturalCustom = true;
+    }
+    else
+    {
+        const bool bundledSkipped = gpuFamily != EAndroidGpuFamily::Adreno && gpuFamily != EAndroidGpuFamily::Unknown;
+        const std::string imported = GetCustomDriverName(turnipDir);
+        naturalCustom = !bundledSkipped ||
+            (imported != BUNDLED_DRIVER_NAME && IsSafeDriverFileName(imported));
+    }
+
+    int overrideKind = state.overrideKind;
+    if (overrideKind != 0 && (overrideKind == 2) == naturalCustom)
+    {
+        // The record names the path the selection takes anyway; it says nothing.
+        overrideKind = 0;
+    }
+
+    if (overrideKind == 0 && state.brokenKnown && state.brokenCustom == naturalCustom)
+    {
+        // The driver the selection would run is the one that rendered incorrectly:
+        // the other path becomes the override.
+        overrideKind = naturalCustom ? 1 : 2;
+    }
+    else if (overrideKind == 0 && state.brokenKnown)
+    {
+        // The record is about the other path than the one the selection takes: stale.
+        RemoveRenderRecoveryState();
+        return;
+    }
+
+    if (overrideKind == 1)
+    {
+        g_runtimeVulkanDriver = EAndroidVulkanDriver::System;
+        g_runtimeRenderMode = EAndroidRenderMode::Auto;
+        g_armCustomVulkanStartup = false;
+        g_renderRecoveryForcedSystem = true;
+
+        state.overrideKind = 1;
+        state.overridePending = true;
+        WriteRenderRecoveryState(state);
+
+        LOGF_WARNING("Render recovery: the custom graphics driver rendered incorrectly (it refused {} of the game's "
+            "pipelines); this launch uses the system driver instead. The configured selection ({}) is unchanged.",
+            state.brokenRefused, VulkanDriverName(state.configuredDriver));
+    }
+    else if (overrideKind == 2)
+    {
+        if (!CustomDriverAvailable(turnipDir, gpuFamily))
+        {
+            // There is no alternative to run: on a GPU the bundled Turnip does not cover,
+            // without an imported driver. The record stays for the launcher to show.
+            LOG("Render recovery: the system driver rendered incorrectly, but no custom driver is available for this GPU.");
+            return;
+        }
+
+        // The Auto branch below resolves the alternative: the bundled build (the Adreno
+        // 8xx one on its SoC), or an imported driver that is selected. The attempt is
+        // committed to the marker where the load is armed - the marker must know of it
+        // before the driver is given a chance to take the process down.
+        g_runtimeVulkanDriver = EAndroidVulkanDriver::Auto;
+        g_runtimeRenderMode = EAndroidRenderMode::Auto;
+        g_armCustomVulkanStartup = true;
+        g_renderRecoveryForcedCustom = true;
+
+        LOGF_WARNING("Render recovery: the system graphics driver rendered incorrectly (it refused {} of the game's "
+            "pipelines); this launch uses the bundled or imported driver instead. The configured selection ({}) is unchanged.",
+            state.brokenRefused, VulkanDriverName(state.configuredDriver));
+    }
+}
+
+void AndroidNoteBrokenRenderDriver(uint32_t refusedPipelineCount)
+{
+    // The marker belongs to the driver that is actually running, not the selected one:
+    // a custom selection can still end up on the system driver.
+    const bool customRuntime = g_customLoaderResolved && g_customLibVulkan != nullptr;
+
+    RenderRecoveryState state;
+    const bool haveState = ReadRenderRecoveryState(state) && RenderRecoveryMatchesConfig(state);
+    if (!haveState)
+        state = RenderRecoveryState{};
+
+    if (haveState && state.overrideKind != 0 && (state.overrideKind == 2) == customRuntime)
+    {
+        // What failed is the override that was supposed to help: both directions lost.
+        state.overrideKind = 0;
+        state.overridePending = false;
+        state.overrideProven = false;
+        state.bothBroken = true;
+    }
+
+    state.configuredDriver = g_configuredVulkanDriver;
+    state.configuredRenderMode = g_configuredRenderMode;
+    state.brokenKnown = true;
+    state.brokenCustom = customRuntime;
+    state.brokenRefused = refusedPipelineCount;
+    state.brokenDriver = customRuntime ? g_activeCustomDriverName : std::string();
+
+    if (customRuntime)
+    {
+        LOGFN_ERROR("Render recovery: the custom graphics driver ({}) could not create {} of the game's pipelines; "
+            "the picture is missing parts or is wrong.", g_activeCustomDriverName, refusedPipelineCount);
+    }
+    else
+    {
+        LOGFN_ERROR("Render recovery: the system graphics driver could not create {} of the game's pipelines; "
+            "the picture is missing parts or is wrong.", refusedPipelineCount);
+    }
+
+    if (state.bothBroken)
+    {
+        LOG_ERROR("Render recovery: the system and the custom driver both failed on this device. "
+            "Nothing is switched automatically any more; sending log.txt to the developers would help. "
+            "The launcher's Graphics section shows a notice with the details.");
+    }
+    else if (customRuntime)
+    {
+        LOG_ERROR("Render recovery: the next launch uses the system driver instead; if it renders correctly it stays "
+            "in use. The configured selection is unchanged; the launcher's Graphics section shows a notice.");
+    }
+    else
+    {
+        LOG_ERROR("Render recovery: the next launch uses the bundled or imported driver instead if this GPU has one; "
+            "if it renders correctly it stays in use. The configured selection is unchanged; the launcher's Graphics "
+            "section shows a notice.");
+    }
+
+    if (!WriteRenderRecoveryState(state))
+        LOG_ERROR("Render recovery: the state file could not be written; the next launch cannot take the failure into account.");
+}
+
+void AndroidNoteRenderHealthy(bool sustained)
+{
+    RenderRecoveryState state;
+    if (!ReadRenderRecoveryState(state))
+        return;
+
+    if (!RenderRecoveryMatchesConfig(state))
+    {
+        RemoveRenderRecoveryState();
+        return;
+    }
+
+    if (g_renderRecoveryForcedSystem || g_renderRecoveryForcedCustom)
+    {
+        const bool customRuntime = g_customLoaderResolved && g_customLibVulkan != nullptr;
+        if (customRuntime != g_renderRecoveryForcedCustom)
+        {
+            // The override never really ran (the custom driver could not be loaded and the
+            // system one took over): nothing is proven, the pending record stays.
+            return;
+        }
+
+        // An override on trial is confirmed by a sustained run only: one that ended
+        // earlier - crashed, or was closed - must not be read as a success.
+        if (!sustained || !state.overridePending)
+            return;
+
+        state.overridePending = false;
+        state.overrideProven = true;
+        if (WriteRenderRecoveryState(state))
+        {
+            LOG("Render recovery: the alternative driver renders correctly. It stays in use while the configured "
+                "selection is known to render incorrectly; the launcher's Graphics section shows a notice.");
+        }
+
+        return;
+    }
+
+    // The configured selection itself renders correctly: anything recorded about it is
+    // stale (a driver update may have fixed what was broken).
+    LOG("Render recovery: the configured driver renders correctly; the earlier trouble record is cleared.");
+    RemoveRenderRecoveryState();
+}
+
 // Several times the size of the largest driver. A file that claims more is not a driver,
 // and is not read into memory to find that out.
 static constexpr uint64_t MAX_WHOLE_FILE_SIZE = 256ull * 1024 * 1024;
@@ -1257,6 +1686,11 @@ static void *OpenCustomLibVulkan()
 
     PrepareVulkanStartup();
 
+    // A render-recovery override the previous launch never proved counts as failed, on
+    // this launch's safe path too: the note is what keeps a crashing override from being
+    // forced again and again.
+    ResolveRenderRecoveryPendingOverride();
+
     // Recovery bypasses custom-driver provisioning/import processing as well as dlopen. This
     // keeps the one-time fallback limited to the platform loader and deterministic Auto mode.
     if (g_forceSafeVulkanFallback)
@@ -1280,6 +1714,15 @@ static void *OpenCustomLibVulkan()
     }
 
     EnsureVulkanDriverInstalled(turnipDir);
+
+    std::string gpuDescription;
+    const EAndroidGpuFamily gpuFamily = DetectGpuFamily(gpuDescription);
+
+    // The driver path this launch runs can differ from the configured selection when the
+    // one the selection takes was reported to render incorrectly (see the render recovery
+    // above). It may turn this launch towards a custom driver, so the boot-recovery arming
+    // decision of PrepareVulkanStartup() is revisited inside.
+    ApplyRenderRecoveryOverride(turnipDir, gpuFamily);
 
     std::string driverName;
     switch (g_runtimeVulkanDriver)
@@ -1333,8 +1776,6 @@ static void *OpenCustomLibVulkan()
             break;
     }
 
-    std::string gpuDescription;
-    const EAndroidGpuFamily gpuFamily = DetectGpuFamily(gpuDescription);
     if (gpuFamily != EAndroidGpuFamily::Adreno && gpuFamily != EAndroidGpuFamily::Unknown)
     {
         // Auto only skips the *bundled* Turnip: an explicitly imported driver selected on a
@@ -1389,6 +1830,21 @@ static void *OpenCustomLibVulkan()
     {
         LOG_ERROR("The native library directory is unknown, cannot load a custom Vulkan driver.");
         return nullptr;
+    }
+
+    if (g_renderRecoveryForcedCustom)
+    {
+        // The override is committed before the driver is in its hands: if loading it takes
+        // the process down, the next launch reads the pending record and does not offer the
+        // override again.
+        RenderRecoveryState state;
+        if (ReadRenderRecoveryState(state) && RenderRecoveryMatchesConfig(state))
+        {
+            state.overrideKind = 2;
+            state.overridePending = true;
+            if (!WriteRenderRecoveryState(state))
+                LOG_ERROR("Render recovery: the override attempt could not be recorded; it is not tracked this launch.");
+        }
     }
 
     if (!ArmCustomVulkanStartup())
@@ -1446,6 +1902,7 @@ static void *OpenCustomLibVulkan()
     }
 
     LOGF("Successfully loaded custom Vulkan driver ({}) via libadrenotools.", driverName);
+    g_activeCustomDriverName = driverName;
     return libVulkan;
 }
 

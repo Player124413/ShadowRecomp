@@ -209,11 +209,42 @@ namespace AndroidVideo
         }
     }
 
+    // A healthy driver creates every pipeline the game asks for, so a handful of refusals
+    // is already wrong; this many means whole parts of the picture are missing, not a
+    // glitch. (The Adreno 710 system driver, for example, refuses hundreds.) When the
+    // count crosses the threshold the driver loader is told once (it records the driver
+    // as broken for the next launch, see os/android/vulkan_driver_android.h); while it
+    // stays under, the checkpoints confirm the driver as healthy instead.
+    //
+    // `sustained` is false for the early checkpoint (the pipelines of the caches are
+    // created) and true for the [render] reports, once frames have been drawn for a
+    // while: only a sustained proof clears an override that is still on trial.
+    static constexpr uint32_t BrokenDriverPipelineThreshold = 32;
+    static std::atomic<bool> s_renderBrokenNoted{ false };
+
+    static void NoteRenderHealth(bool sustained)
+    {
+        const uint32_t refused = GetRefusedPipelineCount();
+        if (refused >= BrokenDriverPipelineThreshold)
+        {
+            if (!s_renderBrokenNoted.exchange(true))
+                AndroidNoteBrokenRenderDriver(refused);
+        }
+        else if (!s_renderBrokenNoted.load())
+        {
+            AndroidNoteRenderHealthy(sustained);
+        }
+    }
+
     void OnCachedPipelinesCreated()
     {
         // The data of the earlier run went into all of these pipelines.
         VulkanPipelineCache::ConfirmLoadedData();
         VulkanPipelineCache::Save();
+
+        // Every pipeline of the caches has been offered to the driver by now: the first
+        // moment a driver that refuses them en masse can be told apart from a healthy one.
+        NoteRenderHealth(false);
 
         // Batches of pipelines that turn up later (for shaders the game creates at runtime)
         // are no longer part of the startup.
@@ -492,20 +523,29 @@ namespace AndroidVideo
         {
         case RenderFormat::BC1_TYPELESS:
         case RenderFormat::BC1_UNORM:
-        case RenderFormat::BC1_UNORM_SRGB:
             decode = BcDecode::EFormat::BC1;
+            break;
+
+        case RenderFormat::BC1_UNORM_SRGB:
+            decode = BcDecode::EFormat::BC1_SRGB;
             break;
 
         case RenderFormat::BC2_TYPELESS:
         case RenderFormat::BC2_UNORM:
-        case RenderFormat::BC2_UNORM_SRGB:
             decode = BcDecode::EFormat::BC2;
+            break;
+
+        case RenderFormat::BC2_UNORM_SRGB:
+            decode = BcDecode::EFormat::BC2_SRGB;
             break;
 
         case RenderFormat::BC3_TYPELESS:
         case RenderFormat::BC3_UNORM:
-        case RenderFormat::BC3_UNORM_SRGB:
             decode = BcDecode::EFormat::BC3;
+            break;
+
+        case RenderFormat::BC3_UNORM_SRGB:
+            decode = BcDecode::EFormat::BC3_SRGB;
             break;
 
         case RenderFormat::BC4_TYPELESS:
@@ -520,8 +560,11 @@ namespace AndroidVideo
 
         case RenderFormat::BC7_TYPELESS:
         case RenderFormat::BC7_UNORM:
-        case RenderFormat::BC7_UNORM_SRGB:
             decode = BcDecode::EFormat::BC7;
+            break;
+
+        case RenderFormat::BC7_UNORM_SRGB:
+            decode = BcDecode::EFormat::BC7_SRGB;
             break;
 
         default:
@@ -536,14 +579,8 @@ namespace AndroidVideo
         }
         }
 
-        if (format == RenderFormat::BC1_UNORM_SRGB || format == RenderFormat::BC2_UNORM_SRGB ||
-            format == RenderFormat::BC3_UNORM_SRGB || format == RenderFormat::BC7_UNORM_SRGB)
-        {
-            static std::atomic<bool> s_warned{ false };
-            if (!s_warned.exchange(true))
-                LOGN_WARNING("An sRGB block-compressed texture is unpacked without its sRGB curve and will look brighter than it should.");
-        }
-
+        // The sRGB forms unpack to the same plain format; the sRGB curve is applied to the
+        // colours while they are unpacked (BcDecode), so the picture keeps its brightness.
         return RenderFormat::R8G8B8A8_UNORM;
     }
 
@@ -559,16 +596,67 @@ namespace AndroidVideo
             VkPhysicalDeviceFeatures features = {};
             vkGetPhysicalDeviceFeatures(vulkanDevice->physicalDevice, &features);
 
-            s_decodeCompressedTextures = !features.textureCompressionBC || Config::DecodeCompressedTextures;
+            bool bcUsable = features.textureCompressionBC;
+            if (bcUsable)
+            {
+                // The feature bit is a promise; the formats answer whether the textures the
+                // game uses are really sampled (with linear filtering). A driver that keeps
+                // only part of the promise would otherwise hand out textures that show
+                // nothing: unpack them instead, exactly as on a GPU without the feature.
+                static constexpr VkFormat BcFormats[] =
+                {
+                    VK_FORMAT_BC1_RGBA_UNORM_BLOCK,
+                    VK_FORMAT_BC2_UNORM_BLOCK,
+                    VK_FORMAT_BC3_UNORM_BLOCK,
+                };
+
+                for (VkFormat bcFormat : BcFormats)
+                {
+                    VkFormatProperties formatProperties = {};
+                    vkGetPhysicalDeviceFormatProperties(vulkanDevice->physicalDevice, bcFormat, &formatProperties);
+
+                    static constexpr VkFormatFeatureFlags Needed =
+                        VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT | VK_FORMAT_FEATURE_SAMPLED_IMAGE_FILTER_LINEAR_BIT;
+
+                    if ((formatProperties.optimalTilingFeatures & Needed) != Needed)
+                    {
+                        LOGFN_WARNING("Vulkan format {} is not sampled with linear filtering although the driver claims "
+                            "block-compressed textures (features {:#X}); they are unpacked when they are loaded instead.",
+                            uint32_t(bcFormat), uint32_t(formatProperties.optimalTilingFeatures));
+                        bcUsable = false;
+                    }
+                }
+            }
+
+            s_decodeCompressedTextures = !bcUsable || Config::DecodeCompressedTextures;
             if (!features.textureCompressionBC)
             {
                 LOGN("Textures: this GPU cannot sample block-compressed (BC, DXT) textures. "
+                     "They are unpacked when they are loaded, which takes four to eight times the memory.");
+            }
+            else if (!bcUsable)
+            {
+                LOGN("Textures: the driver cannot sample every block-compressed (BC, DXT) texture format the game needs. "
                      "They are unpacked when they are loaded, which takes four to eight times the memory.");
             }
             else if (s_decodeCompressedTextures)
             {
                 LOGN("Textures: block-compressed textures are unpacked when they are loaded, as Video.DecodeCompressedTextures in config.toml asks. This GPU can sample them.");
             }
+        }
+
+        // A system driver that never saw Vulkan 1.2 is a decade of phone-driver bugs away
+        // from the ones the game is tested with. Nothing is enforced - some of them work -
+        // but when the picture is wrong on such a driver, it is the first suspect. The
+        // bundled Turnip driver (the Auto setting) is newer than all of them on Adreno.
+        if (!AndroidIsCustomVulkanDriverActive() &&
+            vulkanDevice->physicalDeviceProperties.apiVersion < VulkanRequirements::MakeVersion(1, 2))
+        {
+            LOGFN_WARNING("The system Vulkan driver is Vulkan {}.{} only. Old system drivers are known to refuse the game's "
+                "pipelines or to render a wrong picture; if either happens, set Vulkan driver to Auto or Bundled in the "
+                "launcher, which uses the bundled Turnip driver on Adreno GPUs.",
+                VulkanRequirements::FormatVersion(vulkanDevice->physicalDeviceProperties.apiVersion),
+                vulkanDevice->physicalDeviceProperties.apiVersion & 0xFFF);
         }
 
         // CheckDeviceRequirements() found the features in the driver. Whether plume switched
@@ -709,6 +797,9 @@ namespace AndroidVideo
               "and {:.0f} changes of frame buffer; pipelines the driver refused: {} ({} since the last line).",
             seconds, frames / seconds, double(s_draws) / frames, double(s_skippedDraws) / frames, double(s_framebufferChanges) / frames,
             refused, refused - s_refusedAtLastReport);
+
+        // Frames have been drawn for a while: the sustained checkpoint of render health.
+        NoteRenderHealth(true);
 
         s_refusedAtLastReport = refused;
         s_windowStartMs = now;

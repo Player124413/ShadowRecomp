@@ -6,6 +6,8 @@
 
 #include <cstdio>
 #include <cstring>
+#include <cmath>
+#include <cstdlib>
 #include <string>
 #include <vector>
 
@@ -75,9 +77,14 @@ int main()
     Check(BlockSize(EFormat::BC1) == 8 && BlockSize(EFormat::BC2) == 16 && BlockSize(EFormat::BC3) == 16 &&
         BlockSize(EFormat::BC4) == 8 && BlockSize(EFormat::BC5) == 16 && BlockSize(EFormat::BC7) == 16 && BlockSize(EFormat::None) == 0,
         "blocks have the sizes of their formats");
+    Check(BlockSize(EFormat::BC1_SRGB) == BlockSize(EFormat::BC1) && BlockSize(EFormat::BC2_SRGB) == BlockSize(EFormat::BC2) &&
+        BlockSize(EFormat::BC3_SRGB) == BlockSize(EFormat::BC3) && BlockSize(EFormat::BC7_SRGB) == BlockSize(EFormat::BC7),
+        "an sRGB variant has the blocks of its format");
     Check(PixelSize(EFormat::BC1) == 4 && PixelSize(EFormat::BC2) == 4 && PixelSize(EFormat::BC3) == 4 && PixelSize(EFormat::BC7) == 4 &&
         PixelSize(EFormat::BC4) == 1 && PixelSize(EFormat::BC5) == 2 && PixelSize(EFormat::None) == 0,
         "and unpack to pixels of the sizes of theirs");
+    Check(PixelSize(EFormat::BC1_SRGB) == 4 && PixelSize(EFormat::BC2_SRGB) == 4 && PixelSize(EFormat::BC3_SRGB) == 4 &&
+        PixelSize(EFormat::BC7_SRGB) == 4, "sRGB variants unpack to RGBA too");
 
     // --- BC1: four colours ------------------------------------------------------------------
     // White before black: the two in between are two thirds and one third white.
@@ -284,8 +291,47 @@ int main()
         Check(ok, "an image smaller than a block takes its corner of it and no more", std::to_string(size));
     }
 
+    // --- sRGB variants: the same blocks, the colours put through the sRGB curve -------------
+    // An sRGB texture's numbers are not linear light; a GPU sampling an sRGB format turns
+    // them into linear light on its own. Where the GPU has no sRGB form of the format to
+    // sample, the unpacking does it: the same pixels, every colour channel through the
+    // curve, the transparency left alone (it is not colour).
+    {
+        uint8_t block[8];
+        ColourBlock(block, White, Black, AcrossIndices);
+
+        std::vector<uint8_t> plain(4 * 4 * 4, 0x55), srgb(4 * 4 * 4, 0x55);
+        Decode(EFormat::BC1, block, 8, 4, 4, plain.data(), 16);
+        Decode(EFormat::BC1_SRGB, block, 8, 4, 4, srgb.data(), 16);
+
+        auto toLinear = [](uint8_t value)
+        {
+            const double s = double(value) / 255.0;
+            const double l = s <= 0.04045 ? s / 12.92 : pow((s + 0.055) / 1.055, 2.4);
+            return int(l * 255.0 + 0.5);
+        };
+
+        bool ok = true;
+        for (uint32_t i = 0; i < 16; i++)
+        {
+            const Rgba p = PixelAt(plain, 16, i % 4, i / 4), s = PixelAt(srgb, 16, i % 4, i / 4);
+            // The curve is the definition; one step of the last digit is the arithmetic's.
+            ok &= abs(int(s.r) - toLinear(p.r)) <= 1 && abs(int(s.g) - toLinear(p.g)) <= 1 &&
+                abs(int(s.b) - toLinear(p.b)) <= 1;
+            ok &= s.a == p.a;
+        }
+        Check(ok, "BC1_SRGB is BC1 with the colours through the sRGB curve");
+
+        // Anchors of the curve itself: its ends stay, its middle moves (a half in sRGB is
+        // about a fifth of linear light).
+        const Rgba white = PixelAt(srgb, 16, 0, 0), midA = PixelAt(srgb, 16, 2, 0), midB = PixelAt(srgb, 16, 3, 0);
+        Check(white.r == 255 && white.a == 255, "sRGB white stays white");
+        Check(midA.r == 103 && midB.r == 23, "and the two steps of grey are darker", Text(midA) + " " + Text(midB));
+    }
+
     // Every format stays inside the image, whatever is in the blocks.
-    for (EFormat format : { EFormat::BC1, EFormat::BC2, EFormat::BC3, EFormat::BC4, EFormat::BC5, EFormat::BC7 })
+    for (EFormat format : { EFormat::BC1, EFormat::BC2, EFormat::BC3, EFormat::BC4, EFormat::BC5, EFormat::BC7,
+        EFormat::BC1_SRGB, EFormat::BC2_SRGB, EFormat::BC3_SRGB, EFormat::BC7_SRGB })
     {
         constexpr uint32_t Width = 9, Height = 6;
         const uint32_t pixelSize = PixelSize(format);

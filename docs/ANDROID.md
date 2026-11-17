@@ -110,6 +110,14 @@ The two drivers marked `sysmem+nobin` always render directly and ignore this set
 If a driver crashes or hangs while the game starts, the next launch falls back to the
 system driver on its own. If the problem repeats, select **System**.
 
+A driver can also stay up but draw the game incorrectly: some system drivers refuse to
+create the game's pipelines, and parts of the picture are then missing or wrong. When
+that happens, the next launch uses the other driver on its own — the bundled or an
+imported one instead of the system driver, the system driver instead of a custom one —
+while your **Vulkan driver** setting stays as it is. The Graphics section of the launcher
+shows a notice while such an override is in effect, with a button that removes it. If
+both drivers fail, the notice asks you to send `log.txt` to the developers.
+
 ### Starting the game
 
 The game starts while its graphics pipelines (the GPU programs it draws with) are still
