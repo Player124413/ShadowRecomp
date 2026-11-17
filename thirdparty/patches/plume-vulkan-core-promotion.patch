@@ -1,0 +1,70 @@
+From ff44802999aa1051f7a96a4adec834f7709c1980 Mon Sep 17 00:00:00 2001
+From: Arena <arena@local>
+Date: Tue, 17 Nov 2026 11:58:20 +0000
+Subject: [PATCH] vulkan: treat descriptor indexing / scalar block layout /
+ buffer address as available on Vulkan 1.2+ cores
+
+A driver may support Vulkan 1.2 or 1.3 without listing the extension names
+the features began as (VK_EXT_descriptor_indexing, VK_EXT_scalar_block_layout,
+VK_KHR_buffer_device_address, VK_EXT_robustness_2). The spec allows this; the
+feature structs are then chained to VkPhysicalDeviceFeatures2 without the
+extension. Checking only the extension names left the features off on such
+drivers, and renderers that rely on them drew garbage.
+---
+ plume_vulkan.cpp | 20 ++++++++++++++++----
+ 1 file changed, 16 insertions(+), 4 deletions(-)
+
+diff --git a/plume_vulkan.cpp b/plume_vulkan.cpp
+index 58749c4..5f2590c 100644
+--- a/plume_vulkan.cpp
++++ b/plume_vulkan.cpp
+@@ -3865,14 +3865,21 @@ namespace plume {
+         // Check for supported features.
+         void *featuresChain = nullptr;
+         VkPhysicalDeviceDescriptorIndexingFeatures indexingFeatures = {};
+-        const bool descriptorIndexingFound = supportedOptionalExtensions.find(VK_EXT_DESCRIPTOR_INDEXING_EXTENSION_NAME) != supportedOptionalExtensions.end();
++        // Descriptor indexing has been core since Vulkan 1.2, and a 1.2+ driver need not
++        // list the extension it began as (Vulkan spec: "Functionality in this extension is
++        // included in core Vulkan 1.2 ... However, if Vulkan 1.2 is supported and this
++        // extension is not, the ... capability is optional"; the VkPhysicalDeviceFeatures2
++        // chain works with the struct alone). Without it this renderer produces garbage.
++        const bool descriptorIndexingFound = (supportedOptionalExtensions.find(VK_EXT_DESCRIPTOR_INDEXING_EXTENSION_NAME) != supportedOptionalExtensions.end()) ||
++            (physicalDeviceProperties.apiVersion >= VK_API_VERSION_1_2);
+         if (descriptorIndexingFound) {
+             indexingFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_INDEXING_FEATURES;
+             featuresChain = &indexingFeatures;
+         }
+ 
+         VkPhysicalDeviceScalarBlockLayoutFeatures layoutFeatures = {};
+-        const bool scalarBlockLayoutFound = supportedOptionalExtensions.find(VK_EXT_SCALAR_BLOCK_LAYOUT_EXTENSION_NAME) != supportedOptionalExtensions.end();
++        const bool scalarBlockLayoutFound = (supportedOptionalExtensions.find(VK_EXT_SCALAR_BLOCK_LAYOUT_EXTENSION_NAME) != supportedOptionalExtensions.end()) ||
++            (physicalDeviceProperties.apiVersion >= VK_API_VERSION_1_2);
+         if (scalarBlockLayoutFound) {
+             layoutFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SCALAR_BLOCK_LAYOUT_FEATURES;
+             layoutFeatures.pNext = featuresChain;
+@@ -3893,7 +3900,11 @@ namespace plume {
+         }
+ 
+         VkPhysicalDeviceRobustness2FeaturesEXT robustnessFeatures = {};
+-        const bool robustnessFound = supportedOptionalExtensions.find(VK_EXT_ROBUSTNESS_2_EXTENSION_NAME) != supportedOptionalExtensions.end();
++        // Core since Vulkan 1.3 under the same struct name; a 1.3 driver need not list
++        // the extension. Without nullDescriptor, unwritten descriptor slots of the bindless
++        // heap are read anyway on a missing texture.
++        const bool robustnessFound = (supportedOptionalExtensions.find(VK_EXT_ROBUSTNESS_2_EXTENSION_NAME) != supportedOptionalExtensions.end()) ||
++            (physicalDeviceProperties.apiVersion >= VK_API_VERSION_1_3);
+         if (robustnessFound) {
+             robustnessFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ROBUSTNESS_2_FEATURES_EXT;
+             robustnessFeatures.pNext = featuresChain;
+@@ -3901,7 +3912,8 @@ namespace plume {
+         }
+ 
+         VkPhysicalDeviceBufferDeviceAddressFeatures bufferDeviceAddressFeatures = {};
+-        const bool bufferDeviceAddressFound = supportedOptionalExtensions.find(VK_KHR_BUFFER_DEVICE_ADDRESS_EXTENSION_NAME) != supportedOptionalExtensions.end();
++        const bool bufferDeviceAddressFound = (supportedOptionalExtensions.find(VK_KHR_BUFFER_DEVICE_ADDRESS_EXTENSION_NAME) != supportedOptionalExtensions.end()) ||
++            (physicalDeviceProperties.apiVersion >= VK_API_VERSION_1_2);
+         if (bufferDeviceAddressFound) {
+             bufferDeviceAddressFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_BUFFER_DEVICE_ADDRESS_FEATURES;
+             bufferDeviceAddressFeatures.pNext = featuresChain;
+-- 
+2.39.5
+

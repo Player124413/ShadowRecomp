@@ -1,4 +1,4 @@
-﻿cmake_policy(SET CMP0077 NEW)
+cmake_policy(SET CMP0077 NEW)
 
 set(MSDF_ATLAS_BUILD_STANDALONE OFF)
 set(MSDF_ATLAS_USE_SKIA OFF)
@@ -67,6 +67,31 @@ endif()
 add_subdirectory("${SHADOW_RECOMP_THIRDPARTY_ROOT}/o1heap")
 add_subdirectory("${SHADOW_RECOMP_THIRDPARTY_ROOT}/SDL")
 add_subdirectory("${SHADOW_RECOMP_THIRDPARTY_ROOT}/SDL_mixer")
+
+# A Vulkan 1.2/1.3 driver need not list the extension names the descriptor-indexing,
+# scalar-block-layout, buffer-device-address and null-descriptor features began as.
+# Upstream plume queries them by name only, so on such a driver they stay off and the
+# game draws garbage. The patch queries them by API version too. Applied at configure
+# time; the submodule itself stays at its upstream commit.
+find_package(Git QUIET)
+set(PLUME_DIR "${SHADOW_RECOMP_THIRDPARTY_ROOT}/plume")
+set(PLUME_PATCH "${SHADOW_RECOMP_THIRDPARTY_ROOT}/patches/plume-vulkan-core-promotion.patch")
+if (GIT_FOUND AND EXISTS "${PLUME_DIR}/plume_vulkan.cpp")
+    execute_process(
+        COMMAND "${GIT_EXECUTABLE}" -C "${PLUME_DIR}" apply --reverse --check "${PLUME_PATCH}"
+        RESULT_VARIABLE PLUME_ALREADY_PATCHED
+        OUTPUT_QUIET ERROR_QUIET)
+    if (NOT PLUME_ALREADY_PATCHED EQUAL 0)
+        execute_process(
+            COMMAND "${GIT_EXECUTABLE}" -C "${PLUME_DIR}" apply "${PLUME_PATCH}"
+            RESULT_VARIABLE PLUME_PATCH_RESULT
+            OUTPUT_QUIET ERROR_QUIET)
+        if (NOT PLUME_PATCH_RESULT EQUAL 0)
+            message(WARNING "The plume patch ${PLUME_PATCH} could not be applied; on Vulkan 1.2+ drivers that omit the extension names, the game would render garbage.")
+        endif()
+    endif()
+endif()
+
 add_subdirectory("${SHADOW_RECOMP_THIRDPARTY_ROOT}/plume")
 
 if (ANDROID)
