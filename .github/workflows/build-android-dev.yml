@@ -4,7 +4,7 @@
 name: build-android-dev
 on:
   push:
-    branches: ['arena/54f59919-shadowrecomp']
+    branches: ['arena/54f59919-shadowrecomp', 'arena/c333f044-shadowrecomp-android']
     paths-ignore:
       - 'docs/**'
       - '**/*.md'
