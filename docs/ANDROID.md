@@ -114,12 +114,14 @@ A driver can also stay up but draw the game incorrectly: some system drivers ref
 create the game's pipelines, and parts of the picture are then missing or wrong. The same
 is done for a driver that fails earlier - the renderer cannot be created on it (an old
 Mali failure is a "Vulkan backend allocation failure" there) - or for one the game runs
-on without a frame ever reaching the screen. When any of that happens, the next launch
-uses the other driver on its own — the bundled or an imported one instead of the system
-driver, the system driver instead of a custom one — while your **Vulkan driver** setting
-stays as it is. The Graphics section of the launcher shows a notice while such an
-override is in effect, with a button that removes it. If both drivers fail, the notice
-asks you to send `log.txt` to the developers.
+on without a frame ever reaching the screen. A crash anywhere in the session is treated
+the same way: the crash handler records the running driver before the process dies, so
+the next launch runs the other one. When any of that happens, the next launch uses the
+other driver on its own — the bundled or an imported one instead of the system driver,
+the system driver instead of a custom one — while your **Vulkan driver** setting stays
+as it is. The Graphics section of the launcher shows a notice while such an override is
+in effect, with a button that removes it. If both drivers fail, the notice asks you to
+send `log.txt` to the developers.
 
 ### Starting the game
 

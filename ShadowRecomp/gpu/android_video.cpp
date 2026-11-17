@@ -694,19 +694,26 @@ namespace AndroidVideo
 
         // CheckDeviceRequirements() found the features in the driver. Whether plume switched
         // them on is another matter: it goes by the names of the extensions they began as,
-        // which a driver need not list once they are part of its Vulkan version. Whether
-        // the game draws correctly without is up to the driver then, so this is said and
-        // the game goes on.
+        // which a driver need not list once they are part of its Vulkan version. Without
+        // them the game cannot render - textures index the descriptor heap dynamically,
+        // every shader reads its constants by buffer address - and going on would mean the
+        // garbage picture and the plain-coloured rectangles seen on such drivers. Fail
+        // instead: the launch is routed to the other driver path (render recovery), or the
+        // player gets an honest message when there is none.
         if (!capabilities.descriptorIndexing)
         {
-            LOGN_ERROR("The renderer did not switch on descriptor indexing: the driver has it, but does not list " VK_EXT_DESCRIPTOR_INDEXING_EXTENSION_NAME
-                       ". Textures may be missing from the picture.");
+            s_missingDeviceFeature = "descriptor indexing switched on (the driver has it, but does not list " VK_EXT_DESCRIPTOR_INDEXING_EXTENSION_NAME
+                ", the extension it began as)";
+            LOGFN_ERROR("This Vulkan driver cannot run the game: {}.", s_missingDeviceFeature);
+            return false;
         }
 
         if (!capabilities.bufferDeviceAddress)
         {
-            LOGN_ERROR("The renderer did not switch on buffer device address: the driver has it, but does not list " VK_KHR_BUFFER_DEVICE_ADDRESS_EXTENSION_NAME
-                       ". The picture may be wrong or empty.");
+            s_missingDeviceFeature = "buffer device address switched on (the driver has it, but does not list " VK_KHR_BUFFER_DEVICE_ADDRESS_EXTENSION_NAME
+                ", the extension it began as)";
+            LOGFN_ERROR("This Vulkan driver cannot run the game: {}.", s_missingDeviceFeature);
+            return false;
         }
 
         // The address of a buffer is asked for by the name the command has from Vulkan 1.2

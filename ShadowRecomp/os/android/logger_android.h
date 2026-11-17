@@ -20,6 +20,11 @@ namespace os::android
     // driver that dies during startup apart from a crash in the middle of a session.
     void SetLogLocation(const std::string_view location);
 
+    // Called by the crash handler before the signal is re-raised, so the launch flow can
+    // count crashes in a row of one driver selection and fall back to the other. This file
+    // has a no-op default; os/android/vulkan_driver_android.cpp overrides it.
+    void NoteCrash();
+
     // Startup timeline ("[startup]" lines of log.txt), what a "the game takes long to
     // start" report is read off.
     //

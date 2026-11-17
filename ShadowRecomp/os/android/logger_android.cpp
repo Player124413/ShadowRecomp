@@ -559,6 +559,11 @@ static void CrashSignalHandler(int signal, siginfo_t* info, void* contextPtr)
         CrashWriteRaw(fd, "[crash] end of report; the system tombstone (if any) has the full backtrace.\n");
     }
 
+    // The crash is counted before it takes the process down, so that the launch flow can
+    // fall back to the other driver when one selection keeps crashing. Async-signal-safe:
+    // it only writes an integer to a preference file (vulkan_driver_android.cpp).
+    os::android::NoteCrash();
+
     // Restore and re-raise so debuggerd still produces the real tombstone.
     sigaction(signal, &s_previousCrashActions[signal], nullptr);
     raise(signal);
@@ -861,4 +866,10 @@ void os::android::LogHeartbeat()
         if (pthread_create(&thread, nullptr, WatchdogThread, nullptr) == 0)
             pthread_detach(thread);
     });
+}
+
+// The launch flow counts crashes in vulkan_driver_android.cpp. Outside the game (host
+// test harnesses) counting does nothing.
+__attribute__((weak)) void os::android::NoteCrash()
+{
 }

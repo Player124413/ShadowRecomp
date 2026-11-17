@@ -908,6 +908,18 @@ void AndroidNoteRenderFailed(const char *reason)
     NoteRenderDriverFailed(reason, 0);
 }
 
+// The crash handler (os/android/logger_android.cpp) reports here before the signal is
+// re-raised. A crash does as much damage to a driver selection as a broken renderer does
+// - the player sees the app die instead of a picture - so it is recorded the same way and
+// the next launch is routed to the other driver. Async-signal-safe: the marker write is
+// only open/write/close on one file, like the crash report itself.
+void os::android::NoteCrash()
+{
+    // The launcher shows the failure as "it crashed or failed to initialize the renderer";
+    // the [crash] report in log.txt right above says what really happened.
+    NoteRenderDriverFailed("device", 0);
+}
+
 void AndroidNoteRenderHealthy(bool sustained)
 {
     RenderRecoveryState state;

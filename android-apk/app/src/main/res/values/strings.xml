@@ -61,7 +61,7 @@
     <string name="launcher_driver_render_both_broken">The system and the custom graphics driver both failed to render the game (%1$s). Please send log.txt to the developers; an imported driver may help meanwhile.</string>
     <string name="launcher_driver_render_reason_pipelines">it refused %1$d of the game\'s pipelines</string>
     <string name="launcher_driver_render_reason_requirements">it lacks features the game needs</string>
-    <string name="launcher_driver_render_reason_device">rendering could not be initialized with it</string>
+    <string name="launcher_driver_render_reason_device">it crashed or failed to initialize the renderer</string>
     <string name="launcher_driver_render_reason_blackscreen">it never showed a frame</string>
     <string name="launcher_driver_render_dismiss">Use my setting anyway</string>
     <string name="launcher_log_found">Latest log found (%1$s).</string>

@@ -62,7 +62,7 @@
     <string name="launcher_driver_render_both_broken">И системный, и встроенный графический драйвер не смогли отрисовать игру (%1$s). Пожалуйста, отправьте log.txt разработчикам; а пока может помочь импортированный драйвер.</string>
     <string name="launcher_driver_render_reason_pipelines">он отказался создавать конвейеры игры: %1$d</string>
     <string name="launcher_driver_render_reason_requirements">в нём нет возможностей, которые нужны игре</string>
-    <string name="launcher_driver_render_reason_device">рендер на нём не удалось инициализировать</string>
+    <string name="launcher_driver_render_reason_device">игра вылетела или не смогла инициализировать рендер</string>
     <string name="launcher_driver_render_reason_blackscreen">он так и не показал ни одного кадра</string>
     <string name="launcher_driver_render_dismiss">Всё равно использовать мою настройку</string>
     <string name="launcher_log_found">Найден последний лог (%1$s).</string>

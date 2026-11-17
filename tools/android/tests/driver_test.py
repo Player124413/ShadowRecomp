@@ -788,6 +788,35 @@ check(r["custom"] == "1" and r["driver"] == "vulkan.panvk_test.so", f"and used: 
 check("override=custom" in read(recovery_path(d)) and "override_pending=1" in read(recovery_path(d)), "tracked")
 d.close()
 
+scenario("render recovery: a crash of the driver routes the next launch to the other one")
+# The game's crash handler (logger_android.cpp) counts a fatal signal against the running
+# driver by calling os::android::NoteCrash() before the process is re-raised into the
+# system tombstone; the harness calls the same hook. A crash must do as much damage to a
+# selection as a broken renderer: one launch later the other driver path runs.
+d = stamped()
+d.launch(AUTO)
+r = d.launch(SYSTEM, health="crash")  # the process would die here on a device
+check(r["rc"] == 0, "the harness survives; on the device this launch is a crash")
+marker = read(recovery_path(d))
+check("broken_kind=system" in marker and "broken_reason=device" in marker,
+      f"the crash is recorded against the system driver:\n{marker}")
+r = d.launch(SYSTEM, health="sustained")
+check(r["custom"] == "1" and r["driver"] == N_BUNDLED, f"the next launch is forced onto the bundled driver: {r['driver']}")
+check("override_proven=1" in read(recovery_path(d)), "and a sustained run proves it")
+d.close()
+
+scenario("render recovery: a crash of the bundled driver falls back to the system one")
+d = stamped()
+r = d.launch(AUTO, health="crash")
+check(r["custom"] == "1", "the crashing launch ran the bundled driver")
+marker = read(recovery_path(d))
+check("broken_kind=custom" in marker and "broken_driver=" + N_BUNDLED in marker,
+      f"the crash is recorded against the bundled driver:\n{marker}")
+r = d.launch(AUTO, health="sustained")
+check(r["custom"] == "0" and r["driver"] == "-", "forced onto the system driver")
+check("override=system" in marker or "override_proven=1" in read(recovery_path(d)), "the override stays")
+d.close()
+
 scenario("render recovery: an invalid record is removed")
 d = stamped()
 d.launch(AUTO)

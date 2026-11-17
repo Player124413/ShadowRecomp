@@ -75,7 +75,9 @@ namespace AndroidVideo
     // - plume switches descriptor indexing and buffer device address on by the names of
     //   the extensions they began as. A driver need not list those names once the features
     //   are part of its Vulkan version, and then they stay off, although the check above
-    //   found them. What the game draws then is up to the driver; the log is told.
+    //   found them. The game cannot render like that (broken textures, garbage vertices),
+    //   so this returns false and GetMissingDeviceFeature() says why; the launch is then
+    //   routed to the other driver (see os/android/vulkan_driver_android.h).
     // - The command that tells the address of a buffer is asked of the device itself, under
     //   its name from Vulkan 1.2 or the one of the extension, whichever the driver has.
     //   Should it have neither, this returns false and GetMissingDeviceFeature() says so.

@@ -136,6 +136,16 @@ int main(int argc, char** argv)
                 AndroidNoteRenderHealthy(false);
             else if (strcmp(argv[4], "sustained") == 0)
                 AndroidNoteRenderHealthy(true);
+            else if (strcmp(argv[4], "crash") == 0)
+            {
+                // What the game's crash handler does with a fatal signal: the failure is
+                // recorded against the running driver (vulkan_driver_android.cpp overrides
+                // the weak no-op of logger_android.cpp), and then the process dies. The
+                // harness skips the dying part - it must print its report and exit
+                // normally - but proves the override is linked in: with the no-op the
+                // marker below would not appear.
+                os::android::NoteCrash();
+            }
         }
     }
 
