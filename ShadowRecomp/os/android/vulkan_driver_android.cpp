@@ -513,6 +513,7 @@ static bool ArmCustomVulkanStartup()
 //   broken_kind=system|custom       which driver path was reported broken
 //   broken_refused=<n>              pipelines it refused when it was reported
 //   broken_driver=<name>            the custom driver file, when broken_kind=custom
+//   broken_reason=<word>            pipelines|requirements|device|blackscreen; how it failed
 //   override=system|custom          the alternative this launch is being run with
 //   override_pending=1              the override run has not been proven healthy yet
 //   both_broken=1                   both paths failed; nothing is forced any more
@@ -534,6 +535,7 @@ struct RenderRecoveryState
     bool brokenCustom = false;   // Which driver path was reported broken.
     uint32_t brokenRefused = 0;
     std::string brokenDriver;    // The custom driver's file name, when brokenCustom.
+    std::string brokenReason;    // "pipelines", "requirements", "device" or "blackscreen".
     int overrideKind = 0;        // 0: none, 1: system, 2: custom.
     bool overridePending = false;
     bool overrideProven = false; // A sustained healthy run on the override happened once.
@@ -605,6 +607,12 @@ static bool ReadRenderRecoveryState(RenderRecoveryState &state)
             if (value != "-")
                 parsed.brokenDriver = std::string(value);
         }
+        else if (key == "broken_reason")
+        {
+            // Only the words the launcher has a text for.
+            if (value == "pipelines" || value == "requirements" || value == "device" || value == "blackscreen")
+                parsed.brokenReason = std::string(value);
+        }
         else if (key == "override")
             parsed.overrideKind = value == "system" ? 1 : value == "custom" ? 2 : 0;
         else if (key == "override_pending")
@@ -638,11 +646,12 @@ static bool WriteRenderRecoveryState(const RenderRecoveryState &state)
 
     const std::string contents = fmt::format(
         "version=1\nconfigured_driver={}\nconfigured_render_mode={}\n"
-        "broken_kind={}\nbroken_refused={}\nbroken_driver={}\n"
+        "broken_kind={}\nbroken_refused={}\nbroken_driver={}\nbroken_reason={}\n"
         "override={}\noverride_pending={}\noverride_proven={}\nboth_broken={}\n",
         unsigned(state.configuredDriver), unsigned(state.configuredRenderMode),
         state.brokenKnown ? (state.brokenCustom ? "custom" : "system") : "-",
         state.brokenRefused, state.brokenDriver.empty() ? "-" : state.brokenDriver,
+        state.brokenReason.empty() ? "-" : state.brokenReason,
         state.overrideKind == 1 ? "system" : state.overrideKind == 2 ? "custom" : "-",
         state.overridePending ? 1 : 0, state.overrideProven ? 1 : 0, state.bothBroken ? 1 : 0);
 
@@ -815,7 +824,7 @@ static void ApplyRenderRecoveryOverride(const std::string &turnipDir, EAndroidGp
     }
 }
 
-void AndroidNoteBrokenRenderDriver(uint32_t refusedPipelineCount)
+static void NoteRenderDriverFailed(const char *reason, uint32_t refusedPipelineCount)
 {
     // The marker belongs to the driver that is actually running, not the selected one:
     // a custom selection can still end up on the system driver.
@@ -841,16 +850,22 @@ void AndroidNoteBrokenRenderDriver(uint32_t refusedPipelineCount)
     state.brokenCustom = customRuntime;
     state.brokenRefused = refusedPipelineCount;
     state.brokenDriver = customRuntime ? g_activeCustomDriverName : std::string();
+    state.brokenReason = reason;
+
+    const char *howItFailed =
+        strcmp(reason, "requirements") == 0 ? "it lacks features the game needs" :
+        strcmp(reason, "device") == 0 ? "the renderer could not be created on it" :
+        strcmp(reason, "blackscreen") == 0 ? "the game runs, but no frame reaches the screen" :
+        "it refused the game's pipelines";
 
     if (customRuntime)
     {
-        LOGFN_ERROR("Render recovery: the custom graphics driver ({}) could not create {} of the game's pipelines; "
-            "the picture is missing parts or is wrong.", g_activeCustomDriverName, refusedPipelineCount);
+        LOGFN_ERROR("Render recovery: the custom graphics driver ({}) cannot render the game: {}.",
+            g_activeCustomDriverName, howItFailed);
     }
     else
     {
-        LOGFN_ERROR("Render recovery: the system graphics driver could not create {} of the game's pipelines; "
-            "the picture is missing parts or is wrong.", refusedPipelineCount);
+        LOGFN_ERROR("Render recovery: the system graphics driver cannot render the game: {}.", howItFailed);
     }
 
     if (state.bothBroken)
@@ -873,6 +888,24 @@ void AndroidNoteBrokenRenderDriver(uint32_t refusedPipelineCount)
 
     if (!WriteRenderRecoveryState(state))
         LOG_ERROR("Render recovery: the state file could not be written; the next launch cannot take the failure into account.");
+}
+
+void AndroidNoteBrokenRenderDriver(uint32_t refusedPipelineCount)
+{
+    LOGFN_ERROR("Render recovery: the driver refused to create {} of the game's pipelines.", refusedPipelineCount);
+    NoteRenderDriverFailed("pipelines", refusedPipelineCount);
+}
+
+void AndroidNoteRenderFailed(const char *reason)
+{
+    // Only the words the launcher has a text for.
+    if (reason == nullptr ||
+        (strcmp(reason, "requirements") != 0 && strcmp(reason, "device") != 0 && strcmp(reason, "blackscreen") != 0))
+    {
+        reason = "device";
+    }
+
+    NoteRenderDriverFailed(reason, 0);
 }
 
 void AndroidNoteRenderHealthy(bool sustained)

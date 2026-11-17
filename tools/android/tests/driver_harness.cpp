@@ -4,9 +4,10 @@
 //   driver_harness <driver 0..6> <render mode 0..2> <reach swapchain 0|1> [health]
 //
 // [health] is what the renderer's health checkpoints of this launch report, if anything:
-// "broken:<n>" calls AndroidNoteBrokenRenderDriver(n), "healthy" AndroidNoteRenderHealthy(false),
-// "sustained" AndroidNoteRenderHealthy(true). It is reported after the swapchain is reached,
-// as in the real flow.
+// "broken:<n>" calls AndroidNoteBrokenRenderDriver(n), "failed:<reason>" calls
+// AndroidNoteRenderFailed(reason) - a driver that failed before pipelines existed -
+// "healthy" AndroidNoteRenderHealthy(false), "sustained" AndroidNoteRenderHealthy(true).
+// It is reported after the swapchain is reached, as in the real flow.
 //
 // Directories and the APK stamp come from the SHADOWRECOMP_* variables (the real
 // storage_android.cpp reads them), system properties from PROP_<name with dots as
@@ -129,6 +130,8 @@ int main(int argc, char** argv)
         {
             if (strncmp(argv[4], "broken:", 7) == 0)
                 AndroidNoteBrokenRenderDriver(uint32_t(strtoul(argv[4] + 7, nullptr, 10)));
+            else if (strncmp(argv[4], "failed:", 7) == 0)
+                AndroidNoteRenderFailed(argv[4] + 7);
             else if (strcmp(argv[4], "healthy") == 0)
                 AndroidNoteRenderHealthy(false);
             else if (strcmp(argv[4], "sustained") == 0)

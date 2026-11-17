@@ -51,6 +51,18 @@ namespace AndroidVideo
     // timeline of log.txt: the end of the black screen the game starts on.
     void OnFramePresented();
 
+    // Render recovery's failure notes (os/android/vulkan_driver_android.h), for callers
+    // that only know this header. `reason` is one of "requirements" (the driver lacks
+    // features the game needs), "device" (the renderer could not be created) or
+    // "blackscreen" (the game runs, but no frame reaches the screen).
+    void NoteRenderFailed(const char* reason);
+
+    // Call once per frame from the swap-chain check, while a window exists and the app is
+    // in the foreground. If the game keeps running but no frame becomes presentable for a
+    // long while (a driver that never puts anything on the screen), the driver path is
+    // noted as broken once: the next launch runs the other driver.
+    void WatchdogFrameTick();
+
     // Asks the driver, before a device is created on it, for what the renderer cannot do
     // without (see gpu/vulkan_requirements.h) and writes the answer to the log. Returns
     // false if something is missing: GetMissingDeviceFeature() then says what, for the

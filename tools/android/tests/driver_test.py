@@ -698,6 +698,40 @@ check("both_broken=0" in marker and "override=custom" in marker and "override_pr
       f"not a failure (the pending bit is this run's own tracker):\n{marker}")
 d.close()
 
+scenario("render recovery: a driver the renderer cannot be created on")
+d = stamped()
+d.launch(AUTO)
+r = d.launch(SYSTEM, health="failed:device")  # the old-Mali failure: "backend allocation failure"
+check(r["custom"] == "0", "the failed launch ran the system driver")
+marker = read(recovery_path(d))
+check("broken_kind=system" in marker and "broken_reason=device" in marker and "broken_refused=0" in marker,
+      f"the failure is recorded with its reason:\n{marker}")
+r = d.launch(SYSTEM, health="sustained")  # the next launch is forced onto the bundled driver
+check(r["custom"] == "1" and r["driver"] == N_BUNDLED, f"forced onto the bundled driver: {r['driver']}")
+check("override_pending=0" in read(recovery_path(d)) and "override_proven=1" in read(recovery_path(d)),
+      "proven by the sustained run")
+d.close()
+
+scenario("render recovery: a driver without the features, and no alternative")
+d = Device(props=MALI, assets=False)
+r = d.launch(AUTO, health="failed:requirements")
+check(r["custom"] == "0", "Mali runs the system driver")
+marker = read(recovery_path(d))
+check("broken_kind=system" in marker and "broken_reason=requirements" in marker and "override=-" in marker,
+      f"recorded, nothing to offer:\n{marker}")
+d.close()
+
+scenario("render recovery: a black screen on the override means both failed")
+d = stamped()
+d.launch(AUTO)
+d.launch(SYSTEM, health="broken:60")
+r = d.launch(SYSTEM, health="failed:blackscreen")  # the forced bundled driver never shows a frame
+check(r["custom"] == "1", "the override ran")
+marker = read(recovery_path(d))
+check("both_broken=1" in marker and "override=-" in marker and "broken_reason=blackscreen" in marker,
+      f"both directions failed:\n{marker}")
+d.close()
+
 scenario("render recovery: a healthy configured selection clears the report")
 d = stamped()
 d.launch(SYSTEM, health="broken:100")

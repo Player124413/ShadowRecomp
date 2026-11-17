@@ -550,17 +550,34 @@ public final class LauncherActivity extends Activity {
             } catch (NumberFormatException ignored) {}
             boolean bothBroken = "1".equals(marker.get("both_broken"));
             String override = marker.getOrDefault("override", "-");
+            // How the driver failed, as a short phrase the texts above take (os/android/
+            // vulkan_driver_android.cpp writes the words these cases know).
+            String detail;
+            switch (marker.getOrDefault("broken_reason", "pipelines")) {
+                case "requirements":
+                    detail = getString(R.string.launcher_driver_render_reason_requirements);
+                    break;
+                case "device":
+                    detail = getString(R.string.launcher_driver_render_reason_device);
+                    break;
+                case "blackscreen":
+                    detail = getString(R.string.launcher_driver_render_reason_blackscreen);
+                    break;
+                default:
+                    detail = getString(R.string.launcher_driver_render_reason_pipelines, refused);
+                    break;
+            }
             if (bothBroken) {
-                driverStatus.setText(getString(R.string.launcher_driver_render_both_broken, refused));
+                driverStatus.setText(getString(R.string.launcher_driver_render_both_broken, detail));
                 driverStatus.setTextColor(COLOR_DANGER);
             } else if ("custom".equals(override)) {
-                driverStatus.setText(getString(R.string.launcher_driver_render_override_custom, refused));
+                driverStatus.setText(getString(R.string.launcher_driver_render_override_custom, detail));
                 driverStatus.setTextColor(COLOR_WARNING);
             } else if ("system".equals(override)) {
-                driverStatus.setText(getString(R.string.launcher_driver_render_override_system, refused));
+                driverStatus.setText(getString(R.string.launcher_driver_render_override_system, detail));
                 driverStatus.setTextColor(COLOR_WARNING);
             } else {
-                driverStatus.setText(getString(R.string.launcher_driver_render_broken_none, refused));
+                driverStatus.setText(getString(R.string.launcher_driver_render_broken_none, detail));
                 driverStatus.setTextColor(COLOR_DANGER);
             }
             driverRecoveryButton.setVisibility(View.VISIBLE);

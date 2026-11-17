@@ -136,6 +136,12 @@ namespace AndroidVideo
         return true;
     }
 
+    // Frames since a frame was last presentable; the black-screen watchdog's count. Both
+    // this and OnFramePresentable() belong to the thread that renders, so the plain
+    // counter needs no synchronization.
+    static uint32_t s_framesSincePresentable = 0;
+    static bool s_blackScreenNoted = false;
+
     void OnFramePresentable()
     {
         // Only ever called by the thread that presents.
@@ -145,6 +151,8 @@ namespace AndroidVideo
             s_firstFrame = false;
             os::android::SetLogLocation("in game");
         }
+
+        s_framesSincePresentable = 0;
 
         // A custom driver that loads is not proof that it works; a usable swap chain is.
         AndroidMarkVulkanStartupSuccessful();
@@ -160,6 +168,31 @@ namespace AndroidVideo
             s_firstFrame = false;
             os::android::LogStartupEvent("first frame of the game presented");
         }
+    }
+
+    void NoteRenderFailed(const char* reason)
+    {
+        AndroidNoteRenderFailed(reason);
+    }
+
+    // The game normally presents every frame it runs. This many ticks without one, while
+    // a window exists and the app is up, is a driver that never puts a frame on the
+    // screen: about half a minute at the usual frame rate, longer on a slow one - a wrong
+    // note is much worse than a late one, so the count is generous.
+    static constexpr uint32_t BlackScreenTickLimit = 3600;
+
+    void WatchdogFrameTick()
+    {
+        if (s_blackScreenNoted)
+            return;
+
+        if (++s_framesSincePresentable < BlackScreenTickLimit)
+            return;
+
+        s_blackScreenNoted = true;
+        LOGN_ERROR("The game is running, but no frame has reached the screen for a long time. "
+                   "This driver path is noted as broken; the next launch uses the other one.");
+        AndroidNoteRenderFailed("blackscreen");
     }
 
     void InitPipelineCache(RenderDevice* device)

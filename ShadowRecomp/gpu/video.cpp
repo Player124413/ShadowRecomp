@@ -2329,6 +2329,10 @@ static void CheckSwapChain(bool canRebuild)
 	case AndroidVideo::ESurfaceState::Ready:
 		break;
 	}
+
+	// From here the game is up and a window exists: if nothing presentable comes out for a
+	// long while, the driver never puts a frame on the screen.
+	AndroidVideo::WatchdogFrameTick();
 #endif
 
 	const bool isSwapChainInvalid = !g_swapChainValid;
@@ -2703,7 +2707,11 @@ bool Video::CreateHostDevice(const char* sdlVideoDriver, bool graphicsApiRetry)
 			// Found out here, where it can be put in words, rather than by a renderer
 			// that fails somewhere in a driver without the features it is built on.
 			if (!AndroidVideo::CheckDeviceRequirements(g_interface.get()))
+			{
+				// Another driver may have the features; the next launch tries it.
+				AndroidVideo::NoteRenderFailed("requirements");
 				return false;
+			}
 #endif
 
 			g_device = g_interface->createDevice(Config::GraphicsDevice);
@@ -2746,6 +2754,12 @@ bool Video::CreateHostDevice(const char* sdlVideoDriver, bool graphicsApiRetry)
 
 	if (g_device == nullptr)
 	{
+#ifdef __ANDROID__
+		// The driver stayed up but the renderer could not be created on it (an old Mali
+		// failure, for example, is an allocation failure here). Noted as broken: the next
+		// launch runs the other driver path.
+		AndroidVideo::NoteRenderFailed("device");
+#endif
 		return false;
 	}
 
@@ -2762,7 +2776,10 @@ bool Video::CreateHostDevice(const char* sdlVideoDriver, bool graphicsApiRetry)
 #ifdef __ANDROID__
 	// What plume made of the driver, and of the driver's what the renderer has to adapt to.
 	if (!AndroidVideo::CheckCreatedDevice(g_device.get()))
+	{
+		AndroidVideo::NoteRenderFailed("device");
 		return false;
+	}
 
 	// Mobile GPUs differ a lot in what they can sample; record it for bug reports.
 	AndroidVideo::LogDeviceSupport(g_device.get());

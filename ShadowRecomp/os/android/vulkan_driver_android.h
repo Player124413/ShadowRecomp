@@ -49,6 +49,12 @@ void AndroidMarkVulkanStartupSuccessful();
 //
 // Both are no-ops before the renderer exists and may be called from any thread.
 void AndroidNoteBrokenRenderDriver(uint32_t refusedPipelineCount);
+
+// The same record for a driver that fails before a count of refused pipelines exists:
+// it lacks features the game needs ("requirements"), the renderer could not be created
+// on it ("device"), or the game runs but no frame ever reaches the screen
+// ("blackscreen"). Other words are treated as "device".
+void AndroidNoteRenderFailed(const char *reason);
 void AndroidNoteRenderHealthy(bool sustained);
 
 // dlopen() replacement compiled into plume. C linkage: it stands in for a libc symbol.
